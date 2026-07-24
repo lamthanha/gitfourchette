@@ -278,3 +278,91 @@ def testRebaseDirtyShowsDialogAndAutostashReapplies(tempDir, mainWindow):
     # The dirty change survived the autostash round-trip; no stash left behind
     assert readFile(f"{wd}/notes.txt").decode() == "notes dirty\n"
     assert len(rw.repo.listall_stashes()) == 0
+
+
+def testRebaseBannerDetachedHead(tempDir, mainWindow):
+    wd = makeDivergentBranches(tempDir)
+    runShellScript(
+        """
+        git switch --detach feature
+        git rebase master || true
+        """,
+        wd)
+    rw = mainWindow.openRepo(wd)
+
+    assert rw.repo.state() in REBASE_STATES_FOR_TESTS
+    assert rw.mergeBanner.isVisibleTo(rw)
+    labelText = rw.mergeBanner.label.text()
+    assert re.search(r"rebasing", labelText, re.I)
+    # rebase-merge/head-name contains "detached HEAD" -- must not leak into the title
+    assert not re.search(r"detached", labelText, re.I)
+
+
+def testRebaseOntoAncestorIsUpToDate(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch -c feature master
+        echo "feature only" > feature.txt
+        git add feature.txt
+        git commit -m "feature: own file"
+        """,
+        wd)
+    rw = mainWindow.openRepo(wd)
+    masterTip = rw.repo.branches.local["master"].target
+    oldTip = rw.repo.branches.local["feature"].target
+
+    rw.jump(NavLocator.inCommit(masterTip))
+    # Clean tree, ahead of master: rebases immediately -- git reports "up to date"
+    triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.branches.local["feature"].target == oldTip
+    assert re.search(r"up to date", mainWindow.statusBar().currentMessage(), re.I)
+
+
+def testRebaseDirtyAutostashUnchecked(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch master
+        echo "notes" > notes.txt
+        git add notes.txt
+        git commit -m "base: notes"
+        git switch -c feature
+        echo "feature only" > feature.txt
+        git add feature.txt
+        git commit -m "feature: own file"
+        git switch master
+        echo "master only" > master.txt
+        git add master.txt
+        git commit -m "master: own file"
+        git switch feature
+        echo "notes dirty" > notes.txt
+        """,
+        wd)
+    rw = mainWindow.openRepo(wd)
+    masterTip = rw.repo.branches.local["master"].target
+    oldTip = rw.repo.branches.local["feature"].target
+
+    rw.jump(NavLocator.inCommit(masterTip))
+    triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
+    qmb = findQMessageBox(rw, r"rebase.+feature.+onto")
+    qmb.checkBox().setChecked(False)  # decline autostash
+    qmb.accept()
+
+    # git refuses to rebase a dirty tree without autostash; error is surfaced
+    acceptQMessageBox(rw, r"unstaged|uncommitted|cannot")
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.branches.local["feature"].target == oldTip
+    assert readFile(f"{wd}/notes.txt").decode() == "notes dirty\n"
+
+
+def testRebaseSidebarEntryDisabledForCurrentBranch(tempDir, mainWindow):
+    wd = makeDivergentBranches(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/feature")  # the checked-out branch
+    menu = rw.sidebar.makeNodeMenu(node)
+    action = findMenuAction(menu, r"rebase.+onto")
+    assert not action.isEnabled()
