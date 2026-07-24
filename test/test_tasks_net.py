@@ -21,6 +21,7 @@ from gitfourchette.forms.clonedialog import CloneDialog
 from gitfourchette.forms.deletetagdialog import DeleteTagDialog
 from gitfourchette.forms.newbranchdialog import NewBranchDialog
 from gitfourchette.forms.newtagdialog import NewTagDialog
+from gitfourchette.forms.processdialog import ProcessDialog
 from gitfourchette.forms.pushdialog import PushDialog
 from gitfourchette.forms.remotedialog import RemoteDialog
 from gitfourchette.gitdriver import GitDriver
@@ -1121,3 +1122,30 @@ def testTaskTerminationTerminatesProcess(tempDir, mainWindow, taskThread):
 
     # Check that the branch was not fetched
     assert "localfs/new-remote-branch" not in rw.repo.branches.remote
+
+
+def testFetchShowsNoProcessDialog(tempDir, mainWindow, taskThread):
+    """Quiet fetch (Fork-style): FetchRemotes must not pop up the modal
+    ProcessDialog, even if the git process takes a while. The status bar
+    busy indicator is the only feedback the user gets."""
+    wd = unpackRepo(tempDir)
+    makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
+
+    mainWindow.openRepo(wd)
+    rw = waitForRepoWidget(mainWindow)
+    waitUntilTrue(lambda: not rw.taskRunner.isBusy())
+
+    # Delay the git process long enough for ProcessDialog's pop-up timer
+    # (PopUpDelay) to fire if it were going to -- mirrors testGitProcessStuck's
+    # use of DelayGitCommandContext to hold a git process open under taskThread.
+    with DelayGitCommandContext(delay=2):
+        node = rw.sidebar.findNode(lambda n: n.kind == SidebarItem.Remote and n.data == "localfs")
+        menu = rw.sidebar.makeNodeMenu(node)
+        triggerMenuAction(menu, "fetch")
+
+        waitUntilTrue(rw.taskRunner.isBusy)
+        QTest.qWait(ProcessDialog.PopUpDelay + 300)  # > PopUpDelay while the process is held
+        assert not rw.processDialog.isVisible()
+
+    waitUntilTrue(lambda: not rw.taskRunner.isBusy())
+    assert not rw.processDialog.isVisible()

@@ -163,6 +163,10 @@ class RenameRemoteBranch(RepoTask):
 
 
 class FetchRemotes(RepoTask):
+    def broadcastProcesses(self) -> bool:
+        # Fork-style quiet fetch: status-bar busy indicator only, no modal ProcessDialog.
+        return False
+
     def flow(self, singleRemoteName: str = ""):
         # Bail now if we don't have any remotes
         if not self.repo.listall_remotes_fast():
@@ -235,6 +239,10 @@ class AutoFetchRemotes(RepoTask):
 
 
 class FetchRemoteBranch(RepoTask):
+    def broadcastProcesses(self) -> bool:
+        # Fork-style quiet fetch: status-bar busy indicator only, no modal ProcessDialog.
+        return False
+
     def flow(self, remoteBranchName: str = "", debrief: bool = True):
         shorthand = remoteBranchName
         if not shorthand:
