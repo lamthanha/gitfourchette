@@ -271,3 +271,50 @@ class RebaseTodoDialog(QDialog):
 
     def autostash(self) -> bool:
         return self._offerAutostash and self.autostashCheckBox.isChecked()
+
+
+class SquashMessageDialog(QDialog):
+    """Fork-style immediate squash: just the combined message and an optional
+    autostash checkbox — the todo itself is preset by SquashCommits."""
+
+    def __init__(self, prefillMessage: str, commitCount: int, offerAutostash: bool, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SquashMessageDialog")
+        self.setWindowTitle(_("Squash {0} Commits", commitCount))
+        self.setModal(True)
+        self._offerAutostash = offerAutostash
+
+        promptLabel = QLabel(_("Commit message for the squashed commit:"), self)
+
+        self.messageEdit = QPlainTextEdit(self)
+        self.messageEdit.setPlainText(prefillMessage)
+        self.messageEdit.textChanged.connect(self._revalidate)
+
+        self.autostashCheckBox = QCheckBox(
+            _("Autostash (stash uncommitted changes, then reapply them)"), self)
+        self.autostashCheckBox.setChecked(True)
+        self.autostashCheckBox.setVisible(offerAutostash)
+
+        self.buttonBox = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+        self.okButton = self.buttonBox.button(QDialogButtonBox.StandardButton.Ok)
+        self.okButton.setText(_("&Squash"))
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(promptLabel)
+        layout.addWidget(self.messageEdit)
+        layout.addWidget(self.autostashCheckBox)
+        layout.addWidget(self.buttonBox)
+        self.resize(540, 320)
+        self._revalidate()
+
+    def _revalidate(self):
+        self.okButton.setEnabled(bool(self.messageEdit.toPlainText().strip()))
+
+    def message(self) -> str:
+        return self.messageEdit.toPlainText()
+
+    def autostash(self) -> bool:
+        return self._offerAutostash and self.autostashCheckBox.isChecked()

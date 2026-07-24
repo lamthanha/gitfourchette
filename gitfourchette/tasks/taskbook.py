@@ -51,6 +51,7 @@ class TaskBook:
             tasks.DiscardFiles: _("Discard changes"),
             tasks.DiscardModeChanges: _("Discard mode changes"),
             tasks.DownloadLfsObjects: _("Download LFS objects"),
+            tasks.DropCommits: _("Drop commits"),
             tasks.DropStash: _("Delete stash"),
             tasks.EditRemote: _("Edit remote"),
             tasks.EditUpstreamBranch: _("Edit upstream branch"),
@@ -99,6 +100,7 @@ class TaskBook:
             tasks.SetUpGitIdentity: _("Git identity"),
             tasks.EditRepoSettings: _("Repository settings"),
             tasks.SkipRebase: _("Skip commit and continue rebase"),
+            tasks.SquashCommits: _("Squash commits"),
             tasks.StageFiles: _("Stage files"),
             tasks.SwitchBranch: _("Switch to branch"),
             tasks.UpdateSubmodule: _("Update submodule"),
@@ -129,6 +131,7 @@ class TaskBook:
             tasks.ApplyStash: _("Restore backed up changes to the working directory"),
             tasks.CherrypickCommit: _("Bring the changes introduced by this commit to the current branch"),
             tasks.DeleteBranch: _("Delete this branch locally"),
+            tasks.DropCommits: _("Remove the selected commits from the branch’s history"),
             tasks.EditUpstreamBranch: _("Choose the remote branch to be tracked by this local branch"),
             tasks.ExportStashAsPatch: _("Create a patch file from this stash"),
             tasks.FastForwardBranch: _("Advance this local branch to the tip of the remote-tracking branch"),
@@ -151,6 +154,7 @@ class TaskBook:
             tasks.RevertCommit: _("Revert the changes introduced by this commit"),
             tasks.SetUpGitIdentity: _("Set up the identity under which you create commits"),
             tasks.EditRepoSettings: _("Set up the identity under which you create commits"),
+            tasks.SquashCommits: _("Combine the selected commits into one"),
             tasks.SwitchBranch: _("Switch to this branch and update the working directory to match it"),
         }
 

@@ -717,8 +717,12 @@ def testSelect3PlusCommits(tempDir, mainWindow):
     assert rw.specialDiffView.isVisible()
     assert findTextInWidget(rw.specialDiffView, "5 items selected")
 
+    # This contiguous range of 5 commits now offers the N-commit actions
+    # (squash/drop/interactive rebase) instead of the old "no actions
+    # available" fallback.
     cm = summonContextMenu(rw.graphView.viewport())
-    assert cm.actions()[0].text().lower().startswith("no actions available")
+    assert "quash" in stripAccelerators(cm.actions()[0].text()).lower()
+    assert cm.actions()[0].isEnabled()
     cm.close()
 
 
