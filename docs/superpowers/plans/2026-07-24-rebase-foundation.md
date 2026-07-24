@@ -71,7 +71,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `RepoTask`, `AbortTask`, `TaskPrereqs`, `TaskEffects` from `gitfourchette.tasks.repotask`; `flowCallGit(*args, env=..., autoFail=False) -> GitDriver`; `argsIf` from `gitfourchette.gitdriver`; `NavLocator` from `gitfourchette.nav`.
-- Produces: `class RebaseOnto(RepoTask)` with `flow(self, onto: Oid | str)` (str must be a full refname like `refs/heads/master`); module constant `REBASE_STATES: tuple[RepositoryState, ...]`; test helper `makeDivergentBranches(tempDir) -> str` in `test/test_tasks_rebase.py`. Task 3 and Task 4 rely on these exact names.
+- Produces: `class RebaseOnto(RepoTask)` with `flow(self, onto: Oid | str)` (str must be a full refname like `refs/heads/master`); module constant `REBASE_STATES: tuple[RepositoryState, ...]`; shared generator `_flowRebaseGit(task: RepoTask, *args: str, successStatus: str)` (used with `yield from`; runs git, then resolves the conflict-vs-error outcome); test helper `makeDivergentBranches(tempDir) -> str` in `test/test_tasks_rebase.py`. Task 3 and Task 4 rely on these exact names.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -191,7 +191,7 @@ Expected: FAIL — `triggerContextMenuAction` raises because no menu item matche
 
 import logging
 
-from gitfourchette.gitdriver import GitDriver, argsIf
+from gitfourchette.gitdriver import argsIf
 from gitfourchette.localization import *
 from gitfourchette.nav import NavLocator
 from gitfourchette.porcelain import *
@@ -252,27 +252,25 @@ class RebaseOnto(RepoTask):
         yield from self.flowConfirm(text=text, verb=_("Rebase"), checkbox=autostashCheckbox)
         autostash = autostashCheckbox.isChecked()
 
-        self.epilog.effects |= TaskEffects.Refs | TaskEffects.Head | TaskEffects.Workdir
-        driver = yield from self.flowCallGit(
-            "rebase",
-            *argsIf(autostash, "--autostash"),
-            str(ontoId),
-            env=dict(GIT_NO_EDITOR),
-            autoFail=False)
-
-        yield from self.flowEnterWorkerThread()
-        repo.refresh_index()
-        stillRebasing = repo.state() in REBASE_STATES
-        yield from self.flowEnterUiThread()
-
-        _concludeRebaseCommand(
-            self, driver, stillRebasing,
-            _("Rebased {0} onto {1}.", tquo(branchName), tquo(ontoDisplay)))
+        yield from _flowRebaseGit(
+            self,
+            "rebase", *argsIf(autostash, "--autostash"), str(ontoId),
+            successStatus=_("Rebased {0} onto {1}.", tquo(branchName), tquo(ontoDisplay)))
 
 
-def _concludeRebaseCommand(task: RepoTask, driver: GitDriver, stillRebasing: bool, successStatus: str):
-    """Shared epilog for every git-rebase invocation: a nonzero exit is only an
-    error if the repo did NOT end up in (or remain in) a rebase state."""
+def _flowRebaseGit(task: RepoTask, *args: str, successStatus: str):
+    """Run a git rebase command and resolve its outcome. Shared by every
+    rebase task; call with `yield from`. A nonzero exit is only an error if
+    the repo did NOT end up in (or remain in) a rebase state — otherwise the
+    rebase merely paused on conflicts and the banner takes over."""
+    task.epilog.effects |= TaskEffects.Refs | TaskEffects.Head | TaskEffects.Workdir
+    driver = yield from task.flowCallGit(*args, env=dict(GIT_NO_EDITOR), autoFail=False)
+
+    yield from task.flowEnterWorkerThread()
+    task.repo.refresh_index()
+    stillRebasing = task.repo.state() in REBASE_STATES
+    yield from task.flowEnterUiThread()
+
     if driver.exitCode() != 0 and not stillRebasing:
         raise AbortTask(driver.htmlErrorText())
     if stillRebasing:
@@ -336,7 +334,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Test: `test/test_tasks_rebase.py`
 
 **Interfaces:**
-- Consumes: `REBASE_STATES`, `GIT_NO_EDITOR`, `_concludeRebaseCommand`, `makeDivergentBranches` from Task 2.
+- Consumes: `REBASE_STATES`, `GIT_NO_EDITOR`, `_flowRebaseGit`, `makeDivergentBranches` from Task 2.
 - Produces: `ContinueRebase`, `SkipRebase`, `AbortRebase` (all `flow(self)`, no args); `rebaseProgress(repo: Repo) -> tuple[int, int, str]` returning (step, total, branchShorthand) with zeros/empty when unknown. `refreshBanner` gains a `bannerButtons: list[tuple[str, Callable]]` mechanism.
 
 - [ ] **Step 1: Write the failing tests**
@@ -477,15 +475,7 @@ class ContinueRebase(_RebaseSequencerTask):
         if self.repo.any_conflicts:
             raise AbortTask(_("Fix merge conflicts before continuing the rebase."))
 
-        self.epilog.effects |= TaskEffects.Refs | TaskEffects.Head | TaskEffects.Workdir
-        driver = yield from self.flowCallGit(
-            "rebase", "--continue", env=dict(GIT_NO_EDITOR), autoFail=False)
-
-        yield from self.flowEnterWorkerThread()
-        self.repo.refresh_index()
-        stillRebasing = self.repo.state() in REBASE_STATES
-        yield from self.flowEnterUiThread()
-        _concludeRebaseCommand(self, driver, stillRebasing, _("Rebase completed."))
+        yield from _flowRebaseGit(self, "rebase", "--continue", successStatus=_("Rebase completed."))
 
 
 class SkipRebase(_RebaseSequencerTask):
@@ -495,15 +485,7 @@ class SkipRebase(_RebaseSequencerTask):
             text=_("Do you want to skip the current commit and continue the rebase?"),
             verb=_("Skip"))
 
-        self.epilog.effects |= TaskEffects.Refs | TaskEffects.Head | TaskEffects.Workdir
-        driver = yield from self.flowCallGit(
-            "rebase", "--skip", env=dict(GIT_NO_EDITOR), autoFail=False)
-
-        yield from self.flowEnterWorkerThread()
-        self.repo.refresh_index()
-        stillRebasing = self.repo.state() in REBASE_STATES
-        yield from self.flowEnterUiThread()
-        _concludeRebaseCommand(self, driver, stillRebasing, _("Rebase completed."))
+        yield from _flowRebaseGit(self, "rebase", "--skip", successStatus=_("Rebase completed."))
 
 
 class AbortRebase(_RebaseSequencerTask):
