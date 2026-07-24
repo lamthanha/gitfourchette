@@ -157,12 +157,16 @@ def _flowRebaseGit(task: RepoTask, *args: str, successStatus: str):
     yield from task.flowEnterWorkerThread()
     task.repo.refresh_index()
     stillRebasing = task.repo.state() in REBASE_STATES
+    anyConflicts = task.repo.any_conflicts
     yield from task.flowEnterUiThread()
 
     if driver.exitCode() != 0 and not stillRebasing:
         raise AbortTask(driver.htmlErrorText())
     if stillRebasing:
         task.epilog.status = _("Rebase interrupted: resolve conflicts, then continue the rebase.")
+        task.epilog.jumpTo = NavLocator.inWorkdir()
+    elif anyConflicts:
+        task.epilog.status = _("Rebase succeeded, but reapplying your stashed changes caused conflicts.")
         task.epilog.jumpTo = NavLocator.inWorkdir()
     else:
         task.epilog.status = successStatus

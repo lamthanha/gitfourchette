@@ -243,7 +243,7 @@ class Sidebar(QTreeView):
                 TaskBook.action(
                     self,
                     RebaseOnto,
-                    _("Re&base {0} onto {1}…", activeBranchDisplay, thisBranchDisplay),
+                    _("Rebase {0} &onto {1}…", activeBranchDisplay, thisBranchDisplay),
                     taskArgs=refName,
                 ).replace(enabled=not isCurrentBranch and bool(activeBranchName)),
 

@@ -98,8 +98,8 @@ def _bannerButton(rw, pattern: str):
     # them visible (same as pre-existing merge/cherry-pick/revert banner
     # buttons) -- pump the queue so isVisibleTo() reflects the real state.
     QTest.qWait(0)
-    return next(b for b in rw.mergeBanner.buttons
-                if re.search(pattern, b.text(), re.I) and b.isVisibleTo(rw))
+    return next((b for b in rw.mergeBanner.buttons
+                 if re.search(pattern, b.text(), re.I) and b.isVisibleTo(rw)), None)
 
 
 def _startConflictedRebase(tempDir, mainWindow):
@@ -177,6 +177,45 @@ def testRebaseStartedOutsideApp(tempDir, mainWindow):
         assert _bannerButton(rw, pattern) is not None
 
 
+def testRebaseAutostashPopConflict(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch master
+        echo "base" > shared.txt
+        git add shared.txt
+        git commit -m "base: shared"
+        git switch -c feature
+        echo "feature only" > feature.txt
+        git add feature.txt
+        git commit -m "feature: own file"
+        git switch master
+        echo "master version" > shared.txt
+        git add shared.txt
+        git commit -m "master: shared"
+        git switch feature
+        echo "dirty version" > shared.txt
+        """,
+        wd)
+    rw = mainWindow.openRepo(wd)
+    masterTip = rw.repo.branches.local["master"].target
+
+    rw.jump(NavLocator.inCommit(masterTip))
+    triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
+    acceptQMessageBox(rw, r"rebase.+feature.+onto")
+
+    # The rebase itself completed...
+    assert rw.repo.state() == RepositoryState.NONE
+    newTip = rw.repo.peel_commit(rw.repo.branches.local["feature"].target)
+    assert newTip.message.startswith("feature: own file")
+    assert newTip.parents[0].id == masterTip
+    # ...but popping the autostash conflicted; the changes survive in the stash
+    assert rw.repo.any_conflicts
+    assert len(rw.repo.listall_stashes()) == 1
+    # The fix jumps the user to the workdir so they see the conflicts
+    assert rw.navLocator.context.isWorkdir()
+
+
 def testRebaseOntoFromSidebar(tempDir, mainWindow):
     wd = makeDivergentBranches(tempDir)
     rw = mainWindow.openRepo(wd)
@@ -188,3 +227,5 @@ def testRebaseOntoFromSidebar(tempDir, mainWindow):
 
     # Divergent scenario conflicts, so we should now be mid-rebase
     assert rw.repo.state() in REBASE_STATES_FOR_TESTS
+    # HEAD sits at the rebase target while paused on the first replayed commit
+    assert rw.repo.head_commit_id == masterTip
