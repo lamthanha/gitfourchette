@@ -49,6 +49,27 @@ class SidebarItem(enum.IntEnum):
     RefFolder = enum.auto()
 
 
+def defaultCollapseCache(repoModel) -> set[str]:
+    """Collapse hashes to prime a repo whose sidebar was never opened before:
+    tags and every remote's subtree, except the tracked remote's (the current
+    branch's upstream remote; falling back to 'origin', then the first remote)."""
+    from contextlib import suppress
+
+    remotes = list(repoModel.remotes)
+    tracked = ""
+    with suppress(KeyError, AttributeError, GitError):
+        repo = repoModel.repo
+        upstream = repo.branches.local[repo.head_branch_shorthand].upstream
+        if upstream is not None:
+            tracked = upstream.remote_name
+    if not tracked:
+        tracked = "origin" if "origin" in remotes else (remotes[0] if remotes else "")
+
+    hashes = {f"{SidebarItem.TagsHeader.name}."}
+    hashes |= {f"{SidebarItem.Remote.name}.{name}" for name in remotes if name != tracked}
+    return hashes
+
+
 class SidebarLayout:
     RootItems = [
         SidebarItem.WorkdirHeader,

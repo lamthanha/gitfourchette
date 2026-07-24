@@ -849,6 +849,9 @@ def testCheckoutTag(tempDir, mainWindow, method):
         sb.selectNode(node)
         QTest.keyPress(rw.sidebar, Qt.Key.Key_Return)
     elif method == "sidebardclick":
+        # Tags are collapsed by default; expand so the tag's row is
+        # actually visible/clickable for the double-click simulation.
+        sb.expand(sb.nodeToFilterIndex(sb.findNodeByKind(SidebarItem.TagsHeader)))
         index = sb.nodeToFilterIndex(node)
         rect = sb.visualRect(index)
         QTest.mouseDClick(sb.viewport(), Qt.MouseButton.LeftButton, pos=rect.topLeft())

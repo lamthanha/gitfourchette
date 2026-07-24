@@ -807,7 +807,10 @@ def testPushReplacedTagFails(tempDir, mainWindow):
     # We don't force-push tags, for now
     acceptQMessageBox(rw, "Updates were rejected because the tag already exists in the remote")
 
-    # Make sure the local tag has at least been updated locally
+    # Make sure the local tag has at least been updated locally.
+    # Tags are collapsed by default in the sidebar, and selectAnyRef()
+    # deliberately won't force-expand a collapsed section, so expand it first.
+    rw.sidebar.expand(rw.sidebar.nodeToFilterIndex(rw.sidebar.findNodeByKind(SidebarItem.TagsHeader)))
     rw.sidebar.selectAnyRef(RefPrefix.TAGS + replacedTag)
     assert rw.navLocator.commit == rw.repo.head_commit_id
 

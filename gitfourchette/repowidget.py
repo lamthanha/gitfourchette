@@ -24,6 +24,7 @@ from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.repomodel import RepoModel, UC_FAKEID
 from gitfourchette.sidebar.sidebar import Sidebar
+from gitfourchette.sidebar.sidebarmodel import defaultCollapseCache
 from gitfourchette.syntax import LexJobCache
 from gitfourchette.tasks import RepoTaskRunner, TaskEffects, TaskBook
 from gitfourchette.tasks.misctasks import VerifyGpgQueue
@@ -225,9 +226,13 @@ class RepoWidget(QWidget):
         # Prime Sidebar
 
         with QSignalBlockerContext(self.sidebar):
-            collapseCache = repoModel.prefs.collapseCache
-            if collapseCache:
-                self.sidebar.sidebarModel.collapseCache.update(collapseCache)
+            prefs = repoModel.prefs
+            if not prefs.collapsePrimed:
+                prefs.collapseCache.update(defaultCollapseCache(repoModel))
+                prefs.collapsePrimed = True
+                prefs.setDirty()
+            if prefs.collapseCache:
+                self.sidebar.sidebarModel.collapseCache.update(prefs.collapseCache)
             self.sidebar.refresh(repoModel)
 
         # ----------------------------------

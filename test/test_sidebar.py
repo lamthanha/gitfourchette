@@ -66,6 +66,11 @@ def testSidebarSelectionSync(tempDir, mainWindow):
     rw = mainWindow.openRepo(wd)
     sb = rw.sidebar
 
+    # Tags are collapsed by default; expand so that jumping to a tag ref
+    # further down can still be reflected as a sidebar selection (the
+    # sidebar deliberately won't force-expand collapsed sections).
+    sb.expand(sb.nodeToFilterIndex(sb.findNodeByKind(SidebarItem.TagsHeader)))
+
     rw.jump(NavLocator.inRef("HEAD"))
     assert sb.selectedIndexes()[0].data() == "master"
 
@@ -113,6 +118,10 @@ def testSidebarCollapsedHeaderShowsChildCount(tempDir, mainWindow):
     rw = mainWindow.openRepo(wd)
 
     sb = rw.sidebar
+
+    # Tags are collapsed by default; expand so the "uncollapsed" assertion
+    # below genuinely exercises the uncollapsed label for every header.
+    sb.expand(sb.nodeToFilterIndex(sb.findNodeByKind(SidebarItem.TagsHeader)))
 
     indexes = [sb.nodeToFilterIndex(sb.findNodeByKind(kind))
                for kind in (SidebarItem.RemotesHeader,
@@ -735,3 +744,47 @@ def testCopyBranchName(tempDir, mainWindow):
     node = rw.sidebar.findNodeByRef("refs/remotes/origin/master")
     triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"copy branch name")
     assert QApplication.clipboard().text() == "origin/master"
+
+
+def _sbExpanded(rw, node):
+    return rw.sidebar.isExpanded(rw.sidebar.nodeToFilterIndex(node))
+
+
+def testSidebarCollapseDefaults(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    makeBareCopy(wd, addAsRemote="localfs", preFetch=True)  # origin (canned) + localfs
+    runShellScript("git branch --set-upstream-to=origin/master master", wd)
+    rw = mainWindow.openRepo(wd)
+
+    origin = rw.sidebar.findNode(lambda n: n.kind == SidebarItem.Remote and n.data == "origin")
+    localfs = rw.sidebar.findNode(lambda n: n.kind == SidebarItem.Remote and n.data == "localfs")
+    tags = rw.sidebar.findNodeByKind(SidebarItem.TagsHeader)
+    branches = rw.sidebar.findNodeByKind(SidebarItem.LocalBranchesHeader)
+    remotesRoot = rw.sidebar.findNodeByKind(SidebarItem.RemotesHeader)
+
+    assert _sbExpanded(rw, origin)          # tracked remote stays open
+    assert not _sbExpanded(rw, localfs)     # other remote collapsed
+    assert not _sbExpanded(rw, tags)        # tags collapsed
+    assert _sbExpanded(rw, branches)        # untouched sections stay expanded
+    assert _sbExpanded(rw, remotesRoot)     # remotes ROOT stays open (names visible)
+
+
+def testSidebarCollapseDefaultsPrimeOnlyOnce(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    makeBareCopy(wd, addAsRemote="localfs", preFetch=True)
+    runShellScript("git branch --set-upstream-to=origin/master master", wd)
+    rw = mainWindow.openRepo(wd)
+
+    # User expands everything the defaults collapsed...
+    for node in [rw.sidebar.findNode(lambda n: n.kind == SidebarItem.Remote and n.data == "localfs"),
+                 rw.sidebar.findNodeByKind(SidebarItem.TagsHeader)]:
+        rw.sidebar.expand(rw.sidebar.nodeToFilterIndex(node))
+
+    mainWindow.closeTab(0)
+    rw = mainWindow.openRepo(wd)
+
+    # ...and is NOT re-collapsed on the next open
+    localfs = rw.sidebar.findNode(lambda n: n.kind == SidebarItem.Remote and n.data == "localfs")
+    tags = rw.sidebar.findNodeByKind(SidebarItem.TagsHeader)
+    assert _sbExpanded(rw, localfs)
+    assert _sbExpanded(rw, tags)
