@@ -93,29 +93,31 @@ class DeleteRemoteBranch(RepoTask):
 
 
 class RenameRemoteBranch(RepoTask):
-    def flow(self, remoteBranchShorthand: str):
+    def flow(self, remoteBranchShorthand: str, newBranchName: str = ""):
         assert not remoteBranchShorthand.startswith(RefPrefix.REMOTES)
         remoteName, branchName = split_remote_branch_shorthand(remoteBranchShorthand)
-        newBranchName = branchName  # naked name, NOT prefixed with the name of the remote
 
-        reservedNames = self.repo.listall_remote_branches().get(remoteName, [])
-        with suppress(ValueError):
-            reservedNames.remove(branchName)
-        nameTaken = _("This name is already taken by another branch on this remote.")
+        if not newBranchName:
+            newBranchName = branchName  # naked name, NOT prefixed with the name of the remote
 
-        dlg = TextInputDialog(
-            self.parentWidget(),
-            _("Rename remote branch {0}", tquoe(remoteBranchShorthand)),
-            _("WARNING: This will rename the branch for all users of the remote!") + "<br>" + _("Enter new name:"))
-        dlg.setText(newBranchName)
-        dlg.setValidator(lambda name: nameValidationMessage(name, reservedNames, nameTaken))
-        dlg.okButton.setText(_("Rename on remote"))
+            reservedNames = self.repo.listall_remote_branches().get(remoteName, [])
+            with suppress(ValueError):
+                reservedNames.remove(branchName)
+            nameTaken = _("This name is already taken by another branch on this remote.")
 
-        yield from self.flowDialog(dlg)
-        dlg.deleteLater()
+            dlg = TextInputDialog(
+                self.parentWidget(),
+                _("Rename remote branch {0}", tquoe(remoteBranchShorthand)),
+                _("WARNING: This will rename the branch for all users of the remote!") + "<br>" + _("Enter new name:"))
+            dlg.setText(newBranchName)
+            dlg.setValidator(lambda name: nameValidationMessage(name, reservedNames, nameTaken))
+            dlg.okButton.setText(_("Rename on remote"))
 
-        # Naked name, NOT prefixed with the name of the remote
-        newBranchName = dlg.lineEdit.text()
+            yield from self.flowDialog(dlg)
+            dlg.deleteLater()
+
+            # Naked name, NOT prefixed with the name of the remote
+            newBranchName = dlg.lineEdit.text()
 
         oldShorthand = remoteBranchShorthand
 

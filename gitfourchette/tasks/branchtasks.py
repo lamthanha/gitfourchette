@@ -5,6 +5,7 @@
 # -----------------------------------------------------------------------------
 
 import logging
+from contextlib import suppress
 
 from gitfourchette.forms.newbranchdialog import NewBranchDialog
 from gitfourchette.forms.resetheaddialog import ResetHeadDialog
@@ -98,6 +99,16 @@ class RenameBranch(RepoTask):
         # Pre-select leaf name (e.g. in "folder/leaf" select only "leaf")
         NewBranchDialog.preSelectLeaf(dlg.lineEdit)
 
+        upstream = None
+        renameRemoteCheckbox = None
+        with suppress(KeyError):
+            upstream = self.repo.branches.local[oldBranchName].upstream
+        if upstream is not None:
+            renameRemoteCheckbox = QCheckBox(
+                _("Also rename {0} on the remote", lquoe(upstream.shorthand)))
+            renameRemoteCheckbox.setChecked(False)
+            dlg.setExtraWidget(renameRemoteCheckbox)
+
         yield from self.flowDialog(dlg)
         dlg.deleteLater()
         newBranchName = dlg.lineEdit.text()
@@ -112,6 +123,11 @@ class RenameBranch(RepoTask):
         self.repo.rename_local_branch(oldBranchName, newBranchName)
 
         self.epilog.status = _("Branch {0} renamed to {1}.", tquo(oldBranchName), tquo(newBranchName))
+
+        yield from self.flowEnterUiThread()
+        if renameRemoteCheckbox is not None and renameRemoteCheckbox.isChecked():
+            from gitfourchette.tasks.nettasks import RenameRemoteBranch
+            yield from self.flowSubtask(RenameRemoteBranch, upstream.shorthand, newBranchName)
 
 
 class RenameBranchFolder(RepoTask):

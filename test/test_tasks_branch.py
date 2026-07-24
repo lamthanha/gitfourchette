@@ -1202,3 +1202,61 @@ def testRefreshLibgit2IndexAfterTaskAffectsHead(tempDir, mainWindow):
     rw.jump(NavLocator.inCommit(cherrypickOid, "a/a1"), check=True)
     triggerContextMenuAction(rw.graphView.viewport(), "cherry.?pick")
     acceptQMessageBox(rw, "do you want to apply.+changes.+f73b956")
+
+
+def testRenameBranchAlsoRenamesRemoteBranch(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    barePath = makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
+    rw = mainWindow.openRepo(wd)
+    assert rw.repo.branches.local["no-parent"].upstream_name == "refs/remotes/localfs/no-parent"
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^rename")
+
+    dlg = findQDialog(rw, r"rename.+branch")
+    checkbox: QCheckBox = dlg.findChild(QCheckBox)
+    assert checkbox is not None
+    assert re.search(r"also rename.+localfs/no-parent", checkbox.text(), re.I)
+    assert not checkbox.isChecked()  # default off: no surprise network push
+    checkbox.setChecked(True)
+    dlg.findChild(QLineEdit).setText("renamed-both")
+    dlg.accept()
+
+    assert "renamed-both" in rw.repo.branches.local
+    assert "no-parent" not in rw.repo.branches.local
+    assert "localfs/renamed-both" in rw.repo.branches.remote
+    assert "localfs/no-parent" not in rw.repo.branches.remote
+    assert rw.repo.branches.local["renamed-both"].upstream_name == "refs/remotes/localfs/renamed-both"
+    with RepoContext(barePath) as bareRepo:
+        assert "renamed-both" in bareRepo.branches.local
+        assert "no-parent" not in bareRepo.branches.local
+
+
+def testRenameBranchUncheckedLeavesRemoteAlone(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^rename")
+    dlg = findQDialog(rw, r"rename.+branch")
+    assert not dlg.findChild(QCheckBox).isChecked()
+    dlg.findChild(QLineEdit).setText("local-only")
+    dlg.accept()
+
+    assert "local-only" in rw.repo.branches.local
+    assert "localfs/no-parent" in rw.repo.branches.remote
+    # Local rename preserves the upstream config, still pointing at the old remote branch
+    assert rw.repo.branches.local["local-only"].upstream_name == "refs/remotes/localfs/no-parent"
+
+
+def testRenameBranchWithoutUpstreamHasNoCheckbox(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    runShellScript("git branch lonely", wd)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/lonely")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^rename")
+    dlg = findQDialog(rw, r"rename.+branch")
+    assert dlg.findChild(QCheckBox) is None
+    dlg.reject()
