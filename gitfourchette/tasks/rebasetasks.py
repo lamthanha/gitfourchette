@@ -184,7 +184,14 @@ class InteractiveRebase(RepoTask):
         dlg.deleteLater()
         execRows = dlg.executionRows()
         autostash = dlg.autostash()
-        assert not validateTodo(execRows), "dialog let an invalid todo through"
+
+        if repo.state() != RepositoryState.NONE or repo.head_commit_id != headId:
+            raise AbortTask(_("The repository changed while the dialog was open. "
+                              "Start the interactive rebase again."))
+
+        todoError = validateTodo(execRows)
+        if todoError:
+            raise AbortTask(todoError)
 
         payloadDir = tempfile.mkdtemp(prefix="gitfourchette-rebase-todo-")
         try:

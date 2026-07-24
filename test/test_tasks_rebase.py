@@ -619,3 +619,26 @@ def testInteractiveRebaseDirtyAutostash(tempDir, mainWindow):
     # The dirty change survived the autostash round-trip; no stash left behind
     assert readFile(f"{wd}/one.txt").decode() == "one dirty\n"
     assert len(rw.repo.listall_stashes()) == 0
+
+
+def testInteractiveRebaseRewordAndSquashTogether(tempDir, mainWindow):
+    # Two editor invocations in one rebase: reword fires first (when its
+    # commit is applied), then the squash-chain prompt. Pins the msg-N
+    # queue alignment against git's invocation order.
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    dlg = _openTodoDialog(rw, "ir: one")
+    dlg.setAction(2, "reword")  # "ir: one" (first executed)
+    dlg.setMessage(2, "ir: one (reworded)\n\nBody R.")
+    dlg.setAction(0, "squash")  # "ir: three" folds into "ir: two"
+    dlg.setMessage(0, "ir: two and three\n\nBody S.")
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert _logSummaries(rw.repo, 2) == ["ir: two and three", "ir: one (reworded)"]
+    head = rw.repo.peel_commit(rw.repo.head_commit_id)
+    assert "Body S." in head.message
+    assert "Body R." in head.parents[0].message
+    for name in ("one.txt", "two.txt", "three.txt"):
+        assert name in head.tree
