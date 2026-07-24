@@ -722,3 +722,16 @@ def testSidebarFilterCollapseState(tempDir, mainWindow):
     # folder2 was originally collapsed, but it should now be expanded because
     # we selected it before closing the search bar.
     assert isExpanded("refs/heads/folder2/leaf")
+
+
+def testCopyBranchName(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/master")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"copy branch name")
+    assert QApplication.clipboard().text() == "master"
+
+    node = rw.sidebar.findNodeByRef("refs/remotes/origin/master")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"copy branch name")
+    assert QApplication.clipboard().text() == "origin/master"

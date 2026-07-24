@@ -296,6 +296,8 @@ class Sidebar(QTreeView):
 
                 TaskBook.action(self, NewBranchFromRef, _("New &Branch Here…"), taskArgs=refName),
 
+                ActionDef(_("&Copy Branch Name"), lambda: self.copyToClipboard(branchName)),
+
                 ActionDef.SEPARATOR,
 
                 ActionDef(_("&Hide in Graph"),
@@ -357,6 +359,8 @@ class Sidebar(QTreeView):
                 ActionDef.SEPARATOR,
 
                 *webActions,
+
+                ActionDef(_("&Copy Branch Name"), lambda: self.copyToClipboard(shorthand)),
 
                 ActionDef(_("&Hide in Graph"),
                           lambda: self.wantHideNode(node),
