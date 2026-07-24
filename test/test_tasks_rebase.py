@@ -175,3 +175,16 @@ def testRebaseStartedOutsideApp(tempDir, mainWindow):
     assert re.search(r"rebasing", rw.mergeBanner.label.text(), re.I)
     for pattern in (r"continue", r"skip", r"abort"):
         assert _bannerButton(rw, pattern) is not None
+
+
+def testRebaseOntoFromSidebar(tempDir, mainWindow):
+    wd = makeDivergentBranches(tempDir)
+    rw = mainWindow.openRepo(wd)
+    masterTip = rw.repo.branches.local["master"].target
+
+    node = rw.sidebar.findNodeByRef("refs/heads/master")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"rebase.+feature.+onto")
+    acceptQMessageBox(rw, r"rebase.+feature.+onto.+master")
+
+    # Divergent scenario conflicts, so we should now be mid-rebase
+    assert rw.repo.state() in REBASE_STATES_FOR_TESTS
