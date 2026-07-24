@@ -642,3 +642,147 @@ def testInteractiveRebaseRewordAndSquashTogether(tempDir, mainWindow):
     assert "Body R." in head.parents[0].message
     for name in ("one.txt", "two.txt", "three.txt"):
         assert name in head.tree
+
+
+def testSquashSelectedCommits(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    # Rows: 1="ir: three", 2="ir: two" (contiguous pair; anchor = oldest = "ir: two")
+    qlvClickNthRow(rw.graphView, 1)
+    qlvClickNthRow(rw.graphView, 2, modifier=Qt.KeyboardModifier.ControlModifier)
+    triggerContextMenuAction(rw.graphView.viewport(), r"squash 2 commits")
+
+    dlg = findQDialog(rw, r"squash.+commits")
+    prefill = dlg.messageEdit.toPlainText()
+    assert "ir: two" in prefill
+    assert "ir: three" in prefill
+    assert not dlg.autostashCheckBox.isVisibleTo(dlg)  # clean tree
+    dlg.messageEdit.setPlainText("ir: 2+3\n\nSquashed by test.")
+    assert dlg.okButton.isEnabled()
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert _logSummaries(rw.repo, 2) == ["ir: 2+3", "ir: one"]
+    head = rw.repo.peel_commit(rw.repo.head_commit_id)
+    assert "Squashed by test." in head.message
+    assert "two.txt" in head.tree
+    assert "three.txt" in head.tree
+
+
+def testSquashBlankMessageDisablesOk(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+    oldTip = rw.repo.branches.local["work"].target
+
+    qlvClickNthRow(rw.graphView, 1)
+    qlvClickNthRow(rw.graphView, 2, modifier=Qt.KeyboardModifier.ControlModifier)
+    triggerContextMenuAction(rw.graphView.viewport(), r"squash 2 commits")
+
+    dlg = findQDialog(rw, r"squash.+commits")
+    dlg.messageEdit.setPlainText("   ")
+    assert not dlg.okButton.isEnabled()
+    dlg.reject()
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.branches.local["work"].target == oldTip
+
+
+def testDropSelectedCommitsNonContiguous(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    # Rows 1="ir: three" and 3="ir: one" -- non-contiguous; drop both, keep "ir: two"
+    qlvClickNthRow(rw.graphView, 1)
+    qlvClickNthRow(rw.graphView, 3, modifier=Qt.KeyboardModifier.ControlModifier)
+    triggerContextMenuAction(rw.graphView.viewport(), r"drop 2 commits")
+    acceptQMessageBox(rw, r"drop.+2.+commits")
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert _logSummaries(rw.repo, 1) == ["ir: two"]
+    headTree = rw.repo.peel_commit(rw.repo.head_commit_id).tree
+    assert "two.txt" in headTree
+    assert "one.txt" not in headTree
+    assert "three.txt" not in headTree
+
+
+def testSquashDisabledForNonContiguousSelection(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    qlvClickNthRow(rw.graphView, 1)
+    qlvClickNthRow(rw.graphView, 3, modifier=Qt.KeyboardModifier.ControlModifier)
+    actions = rw.graphView._contextMenuActionsNCommits()
+    squashAction = next(a for a in actions
+                        if getattr(a, "caption", "") and "quash" in a.caption)
+    dropAction = next(a for a in actions
+                      if getattr(a, "caption", "") and "Drop" in a.caption)
+    assert not squashAction.enabled
+    assert dropAction.enabled
+
+
+def testSquashSelectionWithMergeAborts(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch -c work master
+        echo one > one.txt
+        git add one.txt
+        git commit -m "ir: one"
+        git switch -c side
+        echo side > side.txt
+        git add side.txt
+        git commit -m "side: extra"
+        git switch work
+        echo two > two.txt
+        git add two.txt
+        git commit -m "ir: two"
+        git merge side -m "merge side into work"
+        """,
+        wd)
+    rw = mainWindow.openRepo(wd)
+    oldTip = rw.repo.branches.local["work"].target
+
+    # Row 1 is the merge commit (HEAD); row 2 is a non-merge commit either way
+    qlvClickNthRow(rw.graphView, 1)
+    qlvClickNthRow(rw.graphView, 2, modifier=Qt.KeyboardModifier.ControlModifier)
+    triggerContextMenuAction(rw.graphView.viewport(), r"squash 2 commits")
+    acceptQMessageBox(rw, r"merge")
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.branches.local["work"].target == oldTip
+
+
+def testSquashDirtyAutostash(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    writeFile(f"{wd}/one.txt", "one dirty\n")
+    rw = mainWindow.openRepo(wd)
+
+    qlvClickNthRow(rw.graphView, 1)
+    qlvClickNthRow(rw.graphView, 2, modifier=Qt.KeyboardModifier.ControlModifier)
+    triggerContextMenuAction(rw.graphView.viewport(), r"squash 2 commits")
+
+    dlg = findQDialog(rw, r"squash.+commits")
+    assert dlg.autostashCheckBox.isVisibleTo(dlg)
+    assert dlg.autostash()
+    dlg.messageEdit.setPlainText("ir: 2+3")
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert not rw.repo.any_conflicts
+    assert _logSummaries(rw.repo, 2) == ["ir: 2+3", "ir: one"]
+    assert readFile(f"{wd}/one.txt").decode() == "one dirty\n"
+    assert len(rw.repo.listall_stashes()) == 0
+
+
+def testInteractiveRebaseFromMultiSelection(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    qlvClickNthRow(rw.graphView, 1)
+    qlvClickNthRow(rw.graphView, 2, modifier=Qt.KeyboardModifier.ShiftModifier)
+    # Anchored at the OLDEST selected commit ("ir: two") -> todo covers two..HEAD
+    triggerContextMenuAction(rw.graphView.viewport(), r"interactive rebase")
+    dlg = findQDialog(rw, r"interactive rebase")
+    assert [r.summary for r in dlg.rows()] == ["ir: three", "ir: two"]
+    dlg.reject()
+    assert rw.repo.state() == RepositoryState.NONE

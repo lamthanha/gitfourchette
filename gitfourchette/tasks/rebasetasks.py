@@ -10,7 +10,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from gitfourchette.forms.rebasetododialog import RebaseTodoDialog
+from gitfourchette.forms.rebasetododialog import RebaseTodoDialog, SquashMessageDialog
 from gitfourchette.gitdriver import argsIf
 from gitfourchette.localization import *
 from gitfourchette.nav import NavLocator
@@ -18,6 +18,7 @@ from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.rebasetodo import (
     RebaseTodoRow,
+    combinedSquashMessage,
     formatTodoFile,
     planEditorMessages,
     validateTodo,
@@ -236,6 +237,83 @@ class InteractiveRebase(RepoTask):
 
         yield from _flowExecuteTodo(self, execRows, baseId, headId, autostash,
                                     successStatus=_("Interactive rebase completed."))
+
+
+def _mapSelectionToRows(rows: list[RebaseTodoRow], oids: tuple[Oid, ...]) -> list[int]:
+    """Indices (into newest-first rows) of the selected commits. Aborts if any
+    selected commit is absent from the todo (merge commit, or outside the
+    range walked from the oldest selection to HEAD)."""
+    rowIndexByOid = {row.oid: i for i, row in enumerate(rows)}
+    try:
+        return sorted(rowIndexByOid[str(oid)] for oid in oids)
+    except KeyError as exc:
+        raise AbortTask(_("Can’t rewrite this selection: it includes a merge commit "
+                          "or a commit outside the current branch’s history.")) from exc
+
+
+class SquashCommits(RepoTask):
+    def prereqs(self) -> TaskPrereqs:
+        return TaskPrereqs.NoUnborn | TaskPrereqs.NoConflicts
+
+    def flow(self, oids: tuple[Oid, ...]):
+        assert len(oids) >= 2
+        rows, baseId, _flattenedMerges, dirty, headId = yield from _flowPrepareTodo(self, oids[-1])
+
+        indices = _mapSelectionToRows(rows, oids)
+        if indices != list(range(indices[0], indices[-1] + 1)):
+            raise AbortTask(_("Can’t squash a non-contiguous selection of commits."))
+
+        # rows is newest-first: the LAST selected index is the oldest commit —
+        # it stays "pick" and becomes the squash target; the rest fold into it.
+        for i in indices[:-1]:
+            rows[i].action = "squash"
+        execRows = list(reversed(rows))
+
+        prefill = combinedSquashMessage(execRows, execRows.index(rows[indices[0]]))
+        dlg = SquashMessageDialog(prefill, len(indices), dirty, self.parentWidget())
+        yield from self.flowDialog(dlg)
+        dlg.deleteLater()
+        # rows[indices[0]] is the chain's last-executed squash row: its message wins
+        rows[indices[0]].message = dlg.message()
+        autostash = dlg.autostash()
+
+        yield from _flowExecuteTodo(
+            self, execRows, baseId, headId, autostash,
+            successStatus=_("Squashed {0} commits into one.", len(indices)))
+
+
+class DropCommits(RepoTask):
+    def prereqs(self) -> TaskPrereqs:
+        return TaskPrereqs.NoUnborn | TaskPrereqs.NoConflicts
+
+    def flow(self, oids: tuple[Oid, ...]):
+        rows, baseId, _flattenedMerges, dirty, headId = yield from _flowPrepareTodo(self, oids[-1])
+
+        for i in _mapSelectionToRows(rows, oids):
+            rows[i].action = "drop"
+        execRows = list(reversed(rows))
+
+        todoError = validateTodo(execRows)
+        if todoError:
+            raise AbortTask(todoError)
+
+        autostashCheckbox = None
+        if dirty:
+            autostashCheckbox = QCheckBox(_("Autostash (stash uncommitted changes, then reapply them)"))
+            autostashCheckbox.setChecked(True)
+        text = paragraphs(
+            _n("Do you want to drop {n} commit?", "Do you want to drop {n} commits?", n=len(oids)),
+            _("This rewrites the branch’s history."))
+        if autostashCheckbox is not None:
+            yield from self.flowConfirm(text=text, verb=_("Drop"), icon="warning",
+                                        checkbox=autostashCheckbox)
+        else:
+            yield from self.flowConfirm(text=text, verb=_("Drop"), icon="warning")
+        autostash = autostashCheckbox is not None and autostashCheckbox.isChecked()
+
+        yield from _flowExecuteTodo(
+            self, execRows, baseId, headId, autostash,
+            successStatus=_n("Dropped {n} commit.", "Dropped {n} commits.", n=len(oids)))
 
 
 def rebaseProgress(repo: Repo) -> tuple[int, int, str]:

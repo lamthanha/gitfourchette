@@ -257,6 +257,20 @@ class GraphView(QListView):
 
         return locator
 
+    def selectedCommitIds(self) -> tuple[list[Oid], bool]:
+        """Oids of the selected commit rows (newest first, i.e. by ascending
+        graph row), and whether those rows are contiguous."""
+        byRow = {}
+        for index in self.selectedIndexes():
+            if index.data(CommitLogModel.Role.SpecialRow) != SpecialRow.Commit:
+                continue
+            oid = index.data(CommitLogModel.Role.Oid)
+            if oid and oid != UC_FAKEID:
+                byRow[index.row()] = oid
+        rowNumbers = sorted(byRow)
+        contiguous = bool(rowNumbers) and rowNumbers[-1] - rowNumbers[0] == len(rowNumbers) - 1
+        return [byRow[r] for r in rowNumbers], contiguous
+
     def selectRowForLocator(self, locator: NavLocator):
         # Keep scroll position if we're re-selecting the same row
         same = locator.isSimilarEnoughTo(self.navLocator, considerPaths=False)
@@ -377,6 +391,9 @@ class GraphView(QListView):
         elif locator.context == NavContext.COMMITTED:
             if locator.commitDiffAB():
                 actions = self._contextMenuActions2Commits(locator)
+                nCommitActions = self._contextMenuActionsNCommits()
+                if nCommitActions:
+                    actions += [ActionDef.SEPARATOR, *nCommitActions]
             else:
                 actions = self._contextMenuActions1Commit()
 
@@ -384,6 +401,8 @@ class GraphView(QListView):
             special = SpecialRow.fromString(locator.path)
             if special == SpecialRow.TruncatedHistory:
                 actions = self._contextMenuActionsTruncatedHistory()
+            elif special == SpecialRow.TooManyRowsSelected:
+                actions = self._contextMenuActionsNCommits()
 
         # Fall back to no-op menu
         if actions is None:
@@ -498,3 +517,19 @@ class GraphView(QListView):
                       lambda: ExportABDiffAsPatch.invoke(self, diffAB))
         ]
         return actions
+
+    def _contextMenuActionsNCommits(self):
+        oids, contiguous = self.selectedCommitIds()
+        n = len(oids)
+        if n < 2:
+            return None
+        taskArgs = (tuple(oids),)
+        return [
+            TaskBook.action(self, SquashCommits, _("S&quash {0} Commits…", n),
+                            taskArgs=taskArgs).replace(enabled=contiguous),
+            TaskBook.action(self, DropCommits, _("&Drop {0} Commits…", n),
+                            taskArgs=taskArgs),
+            ActionDef.SEPARATOR,
+            TaskBook.action(self, InteractiveRebase, _("Interactive Reb&ase from Here…"),
+                            taskArgs=oids[-1]),
+        ]
