@@ -788,3 +788,72 @@ def testSidebarCollapseDefaultsPrimeOnlyOnce(tempDir, mainWindow):
     tags = rw.sidebar.findNodeByKind(SidebarItem.TagsHeader)
     assert _sbExpanded(rw, localfs)
     assert _sbExpanded(rw, tags)
+
+
+def testStarBranch(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    # No Starred section while nothing is starred
+    assert not rw.sidebar.findNodesByKind(SidebarItem.StarredHeader)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/master")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^star branch")
+
+    starRoot = rw.sidebar.findNodeByKind(SidebarItem.StarredHeader)
+    assert [child.data for child in starRoot.children] == ["refs/heads/master"]
+    assert starRoot.children[0].kind == SidebarItem.LocalBranch
+
+    # Canonical node lookup unaffected: findNodeByRef resolves OUTSIDE Starred
+    canonical = rw.sidebar.findNodeByRef("refs/heads/master")
+    assert canonical.parent.kind != SidebarItem.StarredHeader
+
+    # The alias carries a fully functional branch menu; unstar via the alias
+    alias = starRoot.children[0]
+    menu = rw.sidebar.makeNodeMenu(alias)
+    assert findMenuAction(menu, r"switch to")
+    triggerMenuAction(menu, r"^unstar branch")
+    assert not rw.sidebar.findNodesByKind(SidebarItem.StarredHeader)
+
+
+def testStarRemoteBranch(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/remotes/origin/master")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^star branch")
+
+    starRoot = rw.sidebar.findNodeByKind(SidebarItem.StarredHeader)
+    alias = starRoot.children[0]
+    assert alias.kind == SidebarItem.RemoteBranch
+    assert alias.data == "refs/remotes/origin/master"
+    assert alias.displayName == "origin/master"
+
+
+def testStarredBranchPersistsAcrossReopen(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    node = rw.sidebar.findNodeByRef("refs/heads/master")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^star branch")
+
+    mainWindow.closeTab(0)
+    rw = mainWindow.openRepo(wd)
+    starRoot = rw.sidebar.findNodeByKind(SidebarItem.StarredHeader)
+    assert [child.data for child in starRoot.children] == ["refs/heads/master"]
+
+
+def testStarredBranchPrunedWhenBranchDeleted(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    runShellScript("git branch doomed", wd)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/doomed")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^star branch")
+    assert rw.sidebar.findNodeByKind(SidebarItem.StarredHeader)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/doomed")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^delete")
+    acceptQMessageBox(rw, r"really delete.+branch")
+
+    assert not rw.sidebar.findNodesByKind(SidebarItem.StarredHeader)
+    assert "refs/heads/doomed" not in rw.sidebar.sidebarModel.repoModel.prefs.starredRefs

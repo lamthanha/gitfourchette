@@ -32,6 +32,7 @@ class RepoPrefs(PrefsFile):
     draftAmendMessage: str = ""
     hidePatterns: set = field(default_factory=set)
     showPatterns: set = field(default_factory=set)
+    starredRefs: set = field(default_factory=set)
     collapseCache: set = field(default_factory=set)
     collapsePrimed: bool = False
     sortBranches: RefSort = RefSort.UseGlobalPref

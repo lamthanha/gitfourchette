@@ -195,6 +195,7 @@ class Sidebar(QTreeView):
 
         elif item == SidebarItem.LocalBranch:
             refName = data
+            isStarred = data in model.repoModel.prefs.starredRefs
             prefix, branchName = RefPrefix.split(data)
             assert prefix == RefPrefix.HEADS
             branch = repo.branches.local[branchName]
@@ -300,6 +301,9 @@ class Sidebar(QTreeView):
 
                 ActionDef.SEPARATOR,
 
+                ActionDef(_("Unsta&r Branch") if isStarred else _("Sta&r Branch"),
+                          lambda: self.wantToggleStarNode(node)),
+
                 ActionDef(_("&Hide in Graph"),
                           lambda: self.wantHideNode(node),
                           checkState=[-1, 1][isExplicitlyHidden],
@@ -318,6 +322,8 @@ class Sidebar(QTreeView):
             actions += [TaskBook.action(self, NewBranchFromHead, _("New &Branch Here…")), ]
 
         elif item == SidebarItem.RemoteBranch:
+            isStarred = data in model.repoModel.prefs.starredRefs
+
             activeBranchName = model.repoModel.homeBranch
             activeBranchDisplay = lquoe(activeBranchName) if activeBranchName else _("(no current branch)")
 
@@ -361,6 +367,9 @@ class Sidebar(QTreeView):
                 *webActions,
 
                 ActionDef(_("&Copy Branch Name"), lambda: self.copyToClipboard(shorthand)),
+
+                ActionDef(_("Unsta&r Branch") if isStarred else _("Sta&r Branch"),
+                          lambda: self.wantToggleStarNode(node)),
 
                 ActionDef(_("&Hide in Graph"),
                           lambda: self.wantHideNode(node),
@@ -750,6 +759,24 @@ class Sidebar(QTreeView):
             return
         self.toggleHideRefPattern.emit(pattern, allButThis)
         self.repaint()
+
+    def wantToggleStarNode(self, node: SidebarNode):
+        # Unlike hiding (which is a pure rendering concern resolved on the fly
+        # in SidebarModel.data/isExplicitlyHidden), starring restructures the
+        # sidebar tree itself (Starred section appears/disappears, gains/loses
+        # alias children), so it needs an actual rebuild -- same idiom as
+        # refSortMenu's setSortMode, the sibling in-place-prefs-mutation-then-
+        # rebuild helper in this file.
+        prefs = self.sidebarModel.repoModel.prefs
+        refName = node.data
+        if refName in prefs.starredRefs:
+            prefs.starredRefs.discard(refName)
+        else:
+            prefs.starredRefs.add(refName)
+        prefs.setDirty()
+        self.backUpSelection()
+        self.refresh(self.sidebarModel.repoModel)
+        self.restoreSelectionBackup()
 
     def selectedNode(self) -> SidebarNode | None:
         try:

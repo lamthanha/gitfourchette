@@ -47,6 +47,7 @@ class SidebarItem(enum.IntEnum):
     Tag = enum.auto()
     Submodule = enum.auto()
     RefFolder = enum.auto()
+    StarredHeader = enum.auto()
 
 
 def defaultCollapseCache(repoModel) -> set[str]:
@@ -75,6 +76,8 @@ class SidebarLayout:
         SidebarItem.WorkdirHeader,
         SidebarItem.UncommittedChanges,
         SidebarItem.Spacer,
+        SidebarItem.StarredHeader,
+        SidebarItem.Spacer,
         SidebarItem.LocalBranchesHeader,
         SidebarItem.Spacer,
         SidebarItem.RemotesHeader,
@@ -100,6 +103,7 @@ class SidebarLayout:
         SidebarItem.StashesHeader,
         SidebarItem.SubmodulesHeader,
         SidebarItem.TagsHeader,
+        SidebarItem.StarredHeader,
     ])
 
     UnindentItems = {
@@ -180,12 +184,21 @@ class SidebarNode:
         return self.kind in SidebarLayout.HideableItems
 
     def walk(self):
-        # Unit test helper
+        # Unit test helper. Also used by Sidebar.restoreSelectionBackup, which
+        # is why we don't descend into the Starred section (fork): its
+        # children are ALIAS nodes that deliberately share kind/data with a
+        # canonical node found elsewhere in the tree, and canonical nodes
+        # must stay authoritative for kind/data lookups, same as they already
+        # are for nodesByRef (see SidebarModel.rebuild). Not doing this would
+        # make restoreSelectionBackup prefer a starred alias over the
+        # canonical node it's aliasing, since the Starred section is early in
+        # SidebarLayout.RootItems.
         frontier = self.children[:]
         while frontier:
             node = frontier.pop(0)
             yield node
-            frontier.extend(node.children)
+            if node.kind != SidebarItem.StarredHeader:
+                frontier.extend(node.children)
 
     def isSimilarEnoughTo(self, other: SidebarNode):
         """ Use this to compare SidebarNodes from two different models. """
@@ -355,11 +368,28 @@ class SidebarModel(QAbstractItemModel):
         remoteBranchesDict: dict[str, list[str]] = {}
         tags = []
 
+        # Prune starred refs that no longer exist (e.g. branch deleted) BEFORE
+        # deciding whether the Starred header belongs in the root item list.
+        # repoModel.refs is already fully loaded at this point, so we don't
+        # need to wait for self.nodesByRef (which population of the ref trees
+        # below fills in) to know whether a starred ref is still valid -- this
+        # avoids showing an empty Starred header for one rebuild after the
+        # last starred ref disappears.
+        starredRefs = repoModel.prefs.starredRefs
+        staleStars = {ref for ref in starredRefs if ref not in repoModel.refs}
+        if staleStars:
+            starredRefs -= staleStars
+            repoModel.prefs.setDirty()
+
         # -----------------------------
         # Set up root nodes
         # -----------------------------
+        rootItems = list(SidebarLayout.RootItems)
+        if not starredRefs:
+            starredAt = rootItems.index(SidebarItem.StarredHeader)
+            del rootItems[starredAt:starredAt + 2]   # header + its spacer
         rootNode = SidebarNode(SidebarItem.Root)
-        for eitem in SidebarLayout.RootItems:
+        for eitem in rootItems:
             rootNode.appendChild(SidebarNode(eitem))
         uncommittedNode = rootNode.findChild(SidebarItem.UncommittedChanges)
         branchRoot = rootNode.findChild(SidebarItem.LocalBranchesHeader)
@@ -461,6 +491,19 @@ class SidebarModel(QAbstractItemModel):
             assert remoteNode is not None
             remotePrefix = f"{RefPrefix.REMOTES}{remote}/"
             self.populateRefNodeTree(branches, remoteNode, SidebarItem.RemoteBranch, remotePrefix, repoModel.prefs.sortRemoteBranches)
+
+        # --- Starred section (fork) ---------------------------------------
+        # Aliases only: never registered in nodesByRef, so the canonical node
+        # keeps winning findNodeByRef/indexForRef (jump, highlight, tests).
+        # (staleStars was already pruned from starredRefs up above, before we
+        # decided whether to include the Starred header at all.)
+        if starredRefs:
+            starredRoot = rootNode.findChild(SidebarItem.StarredHeader)
+            for refName in sorted(starredRefs):
+                canonical = self.nodesByRef[refName]
+                alias = SidebarNode(canonical.kind, refName)
+                alias.displayName = RefPrefix.split(refName)[1]
+                starredRoot.appendChild(alias)
 
         # -----------------------------
         # Stashes
