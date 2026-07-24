@@ -774,6 +774,36 @@ def testSquashDirtyAutostash(tempDir, mainWindow):
     assert len(rw.repo.listall_stashes()) == 0
 
 
+def testDropDirtyAutostash(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    # Dirty a file whose creating commit ("ir: three") stays picked, so it
+    # survives the rewrite and we can check the autostash round-trip.
+    writeFile(f"{wd}/three.txt", "three dirty\n")
+    rw = mainWindow.openRepo(wd)
+
+    # Rows: 2="ir: two", 3="ir: one" (anchor = oldest = "ir: one" -> todo
+    # spans three..one; "ir: three" stays picked, "ir: two" and "ir: one"
+    # are dropped).
+    qlvClickNthRow(rw.graphView, 2)
+    qlvClickNthRow(rw.graphView, 3, modifier=Qt.KeyboardModifier.ControlModifier)
+    triggerContextMenuAction(rw.graphView.viewport(), r"drop 2 commits")
+
+    qmb = findQMessageBox(rw, r"drop.+2.+commits")
+    assert qmb.checkBox() is not None
+    assert qmb.checkBox().isChecked()
+    qmb.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert not rw.repo.any_conflicts
+    assert _logSummaries(rw.repo, 1) == ["ir: three"]
+    headTree = rw.repo.peel_commit(rw.repo.head_commit_id).tree
+    assert "three.txt" in headTree
+    assert "one.txt" not in headTree
+    assert "two.txt" not in headTree
+    assert readFile(f"{wd}/three.txt").decode() == "three dirty\n"
+    assert len(rw.repo.listall_stashes()) == 0
+
+
 def testInteractiveRebaseFromMultiSelection(tempDir, mainWindow):
     wd = makeLinearHistory(tempDir)
     rw = mainWindow.openRepo(wd)

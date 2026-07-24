@@ -225,8 +225,6 @@ class InteractiveRebase(RepoTask):
         return TaskPrereqs.NoUnborn | TaskPrereqs.NoConflicts
 
     def flow(self, fromCommit: Oid):
-        repo = self.repo
-
         rows, baseId, flattenedMerges, dirty, headId = yield from _flowPrepareTodo(self, fromCommit)
 
         dlg = RebaseTodoDialog(rows, flattenedMerges, dirty, self.parentWidget())
