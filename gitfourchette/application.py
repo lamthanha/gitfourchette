@@ -96,7 +96,7 @@ class GFApplication(QApplication):
         # - Except in macOS app bundles, which automatically use the embedded .icns file
         # - The file extension must be spelled out in some environments (e.g. Windows)
         if not (MACOS and APP_FREEZE_COMMIT):
-            self.setWindowIcon(QIcon("assets:icons/gitfourchette.png"))
+            self.setWindowIcon(QIcon("assets:icons/forkette.png"))
 
         # Get system default style name before applying further styling
         self.platformDefaultStyleName = self.style().objectName()

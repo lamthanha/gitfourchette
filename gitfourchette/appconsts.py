@@ -14,7 +14,7 @@ def _envBool(key: str) -> bool:
 
 APP_VERSION = "1.9.1+fork"
 APP_SYSTEM_NAME = "gitfourchette"
-APP_DISPLAY_NAME = "GitFourchette"
+APP_DISPLAY_NAME = "Forkette"
 APP_URL_SCHEME = APP_SYSTEM_NAME
 APP_IDENTIFIER = "org.gitfourchette.gitfourchette"
 
