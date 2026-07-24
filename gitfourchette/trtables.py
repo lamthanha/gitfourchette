@@ -204,6 +204,7 @@ class TrTables:
                 SidebarItem.Remote              : _p("SidebarModel", "Remote"),
                 SidebarItem.Tag                 : _p("SidebarModel", "Tag"),
                 SidebarItem.Submodule           : _p("SidebarModel", "Submodules"),
+                SidebarItem.StarredHeader       : _p("SidebarModel", "Starred"),
                 SidebarItem.Spacer              : "---",
             },
 

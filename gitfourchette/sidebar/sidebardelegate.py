@@ -208,7 +208,10 @@ class SidebarDelegate(QStyledItemDelegate):
         # Draw text
         painter.setFont(font)
         fullText = index.data(Qt.ItemDataRole.DisplayRole)
-        isCannedString = node.kind <= SidebarItem.SubmodulesHeader
+        # Header kinds are numbered first in SidebarItem (Spacer..SubmodulesHeader),
+        # EXCEPT StarredHeader (fork), which was appended at the end of the enum
+        # to keep its collapse-hash position free; call it out explicitly here.
+        isCannedString = node.kind <= SidebarItem.SubmodulesHeader or node.kind == SidebarItem.StarredHeader
         if not isCannedString:
             FittedText.draw(painter, textRect, option.displayAlignment, fullText, option.textElideMode)
         else:
