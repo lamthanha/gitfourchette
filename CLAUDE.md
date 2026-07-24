@@ -1,7 +1,7 @@
 # Forkette (GitFourchette fork)
 
 Personal fork of [jorio/gitfourchette](https://github.com/jorio/gitfourchette) (GPL-3) serving as a Fork.dev replacement on Linux (Fedora KDE).
-Roadmap: Phase 1 rebase foundation (DONE) → Phase 2 interactive rebase → Phase 3 worktree management → UX polish.
+Roadmap: Phase 1 rebase foundation (DONE) → Phase 2 interactive rebase (DONE) → Phase 3 worktree management → UX polish.
 
 ## Key documents
 
