@@ -488,3 +488,134 @@ def testInteractiveRebaseReword(tempDir, mainWindow):
     assert _logSummaries(rw.repo, 3) == ["ir: three", "ir: two (reworded)", "ir: one"]
     reworded = rw.repo.peel_commit(rw.repo.head_commit_id).parents[0]
     assert "More detail." in reworded.message
+
+
+def makeDependentHistory(tempDir) -> str:
+    """Branch 'work' where 'ir: beta' depends on 'ir: alpha' (same file),
+    so dropping alpha makes beta conflict; 'ir: own' is independent."""
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch -c work master
+        echo base > shared.txt
+        git add shared.txt
+        git commit -m "ir: base"
+        echo alpha > shared.txt
+        git add shared.txt
+        git commit -m "ir: alpha"
+        echo beta > shared.txt
+        git add shared.txt
+        git commit -m "ir: beta"
+        echo own > own.txt
+        git add own.txt
+        git commit -m "ir: own"
+        """,
+        wd)
+    return wd
+
+
+def testInteractiveRebaseConflictResolveContinue(tempDir, mainWindow):
+    wd = makeDependentHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    dlg = _openTodoDialog(rw, "ir: alpha")
+    assert [r.summary for r in dlg.rows()] == ["ir: own", "ir: beta", "ir: alpha"]
+    dlg.setAction(2, "drop")  # drop alpha -> beta conflicts at step 1 of 2
+    dlg.accept()
+
+    assert rw.repo.state() in REBASE_STATES_FOR_TESTS
+    assert rw.repo.any_conflicts
+    assert rw.mergeBanner.isVisibleTo(rw)
+
+    # Resolve by taking THEIRS (the replayed commit's version: "beta")
+    rw.jump(NavLocator.inUnstaged("shared.txt"))
+    assert rw.conflictView.isVisibleTo(rw)
+    rw.conflictView.ui.theirsButton.click()
+
+    _bannerButton(rw, r"continue").click()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert _logSummaries(rw.repo, 2) == ["ir: own", "ir: beta"]
+    assert readFile(f"{wd}/shared.txt").decode().strip() == "beta"
+    headTree = rw.repo.peel_commit(rw.repo.head_commit_id).tree
+    assert "own.txt" in headTree
+
+
+def testInteractiveRebaseAbortRestoresBranch(tempDir, mainWindow):
+    wd = makeDependentHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+    oldTip = rw.repo.branches.local["work"].target
+
+    dlg = _openTodoDialog(rw, "ir: alpha")
+    dlg.setAction(2, "drop")
+    dlg.accept()
+    assert rw.repo.state() in REBASE_STATES_FOR_TESTS
+
+    _bannerButton(rw, r"abort").click()
+    acceptQMessageBox(rw, r"abort.+rebase")
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.branches.local["work"].target == oldTip
+
+
+def testInteractiveRebaseCancelDialog(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+    oldTip = rw.repo.branches.local["work"].target
+
+    dlg = _openTodoDialog(rw, "ir: one")
+    dlg.reject()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.branches.local["work"].target == oldTip
+
+
+def testInteractiveRebaseWarnsAboutFlattenedMerges(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch -c work master
+        echo one > one.txt
+        git add one.txt
+        git commit -m "ir: one"
+        git switch -c side
+        echo side > side.txt
+        git add side.txt
+        git commit -m "side: extra"
+        git switch work
+        echo two > two.txt
+        git add two.txt
+        git commit -m "ir: two"
+        git merge side -m "merge side into work"
+        """,
+        wd)
+    rw = mainWindow.openRepo(wd)
+
+    dlg = _openTodoDialog(rw, "ir: one")
+    summaries = [r.summary for r in dlg.rows()]
+    assert "merge side into work" not in summaries  # merge commit excluded
+    assert set(summaries) == {"ir: two", "side: extra", "ir: one"}
+    assert summaries[-1] == "ir: one"  # oldest at the bottom
+    assert dlg.mergeWarningLabel.isVisibleTo(dlg)
+    dlg.reject()  # don't execute; flattening semantics are git's own
+
+    assert rw.repo.state() == RepositoryState.NONE
+
+
+def testInteractiveRebaseDirtyAutostash(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    writeFile(f"{wd}/one.txt", "one dirty\n")  # tracked file, uncommitted change
+    rw = mainWindow.openRepo(wd)
+
+    dlg = _openTodoDialog(rw, "ir: one")
+    assert dlg.autostashCheckBox.isVisibleTo(dlg)
+    assert dlg.autostash()
+    dlg.moveRow(0, 1)
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert not rw.repo.any_conflicts
+    assert _logSummaries(rw.repo, 3) == ["ir: two", "ir: three", "ir: one"]
+    # The dirty change survived the autostash round-trip; no stash left behind
+    assert readFile(f"{wd}/one.txt").decode() == "one dirty\n"
+    assert len(rw.repo.listall_stashes()) == 0
