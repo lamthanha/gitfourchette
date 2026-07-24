@@ -471,6 +471,7 @@ class GraphView(QListView):
             checkoutAction,
             TaskBook.action(self, MergeBranch, _("&Merge into {0}…", myRef), taskArgs=(mergeWhat,)),
             TaskBook.action(self, ResetHead, _("&Reset {0} to Here…", myRef), taskArgs=oid),
+            TaskBook.action(self, RebaseOnto, _("Re&base {0} onto Here…", myRef), taskArgs=oid),
             ActionDef.SEPARATOR,
             TaskBook.action(self, CherrypickCommit, _("Cherry &Pick…"), taskArgs=oid),
             TaskBook.action(self, RevertCommit, _("Re&vert…"), taskArgs=oid),

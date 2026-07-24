@@ -25,6 +25,9 @@ from gitfourchette.tasks.branchtasks import (
     ResetHead,
     SwitchBranch,
 )
+from gitfourchette.tasks.rebasetasks import (
+    RebaseOnto,
+)
 from gitfourchette.tasks.committasks import (
     AmendCommit,
     CheckoutCommit,
