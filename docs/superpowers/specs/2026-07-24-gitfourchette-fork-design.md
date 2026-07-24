@@ -48,7 +48,7 @@ Goal: the app becomes rebase-capable, including rebases started outside the app.
 ### `RebaseOnto` task (`tasks/rebasetasks.py`)
 
 - **Entry points:** graph context menu on a single commit — "Rebase HEAD onto here"; sidebar local-branch menu — "Rebase current branch onto ⟨branch⟩".
-- **Confirm dialog:** current branch name, target (short hash or ref name), count of commits that will be replayed (from merge-base), and an **autostash** checkbox (default checked, not persisted in v1).
+- **Confirm dialog:** current branch name, target (short hash or ref name), count of commits that will be replayed (from merge-base), and an **autostash** checkbox (default checked, not persisted in v1). *Amended 2026-07-24 (user request after real-world use): the dialog appears only when the worktree is dirty — clean trees rebase immediately, matching Fork.*
 - **Execution:** `flowCallGit("rebase", target, [--autostash])` with `autoFail=False` and `GIT_EDITOR=true` in the environment.
   - Exit 0 → effects `Refs|Head|Workdir`, status message "Rebased ⟨branch⟩ onto ⟨target⟩".
   - Exit ≠ 0 with `repo.state()` in `REBASE*` → conflict pause; refresh; the rebase banner takes over.
