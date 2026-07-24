@@ -366,3 +366,125 @@ def testRebaseSidebarEntryDisabledForCurrentBranch(tempDir, mainWindow):
     menu = rw.sidebar.makeNodeMenu(node)
     action = findMenuAction(menu, r"rebase.+onto")
     assert not action.isEnabled()
+
+
+def makeLinearHistory(tempDir) -> str:
+    """Branch 'work' with three independent commits (each touches its own
+    file), so any reordering replays cleanly. Newest commit: 'ir: three'."""
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch -c work master
+        echo one > one.txt
+        git add one.txt
+        git commit -m "ir: one"
+        echo two > two.txt
+        git add two.txt
+        git commit -m "ir: two"
+        echo three > three.txt
+        git add three.txt
+        git commit -m "ir: three"
+        """,
+        wd)
+    return wd
+
+
+def _commitIdByMessage(repo, prefix: str):
+    return next(c.id for c in repo.walk(repo.head_commit_id)
+                if c.message.startswith(prefix))
+
+
+def _logSummaries(repo, n: int) -> list[str]:
+    summaries = []
+    for commit in repo.walk(repo.head_commit_id):
+        if len(summaries) == n:
+            break
+        summaries.append(commit.message.splitlines()[0])
+    return summaries
+
+
+def _openTodoDialog(rw, fromPrefix: str):
+    fromId = _commitIdByMessage(rw.repo, fromPrefix)
+    rw.jump(NavLocator.inCommit(fromId))
+    triggerContextMenuAction(rw.graphView.viewport(), r"interactive rebase")
+    return findQDialog(rw, r"interactive rebase")
+
+
+def testInteractiveRebaseReorder(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    dlg = _openTodoDialog(rw, "ir: one")
+    assert [r.summary for r in dlg.rows()] == ["ir: three", "ir: two", "ir: one"]
+    assert not dlg.autostash()  # clean tree: no autostash offer
+    dlg.moveRow(0, 1)  # "three" now executes before "two"
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert _logSummaries(rw.repo, 3) == ["ir: two", "ir: three", "ir: one"]
+    headTree = rw.repo.peel_commit(rw.repo.head_commit_id).tree
+    for name in ("one.txt", "two.txt", "three.txt"):
+        assert name in headTree
+    # Success jumps the view to the rebased HEAD
+    assert rw.navLocator.commit == rw.repo.head_commit_id
+
+
+def testInteractiveRebaseDrop(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    dlg = _openTodoDialog(rw, "ir: one")
+    dlg.setAction(1, "drop")  # drop "ir: two"
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert _logSummaries(rw.repo, 2) == ["ir: three", "ir: one"]
+    headTree = rw.repo.peel_commit(rw.repo.head_commit_id).tree
+    assert "two.txt" not in headTree
+    assert "three.txt" in headTree
+
+
+def testInteractiveRebaseSquashWithEditedMessage(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    dlg = _openTodoDialog(rw, "ir: one")
+    dlg.setAction(1, "squash")  # "ir: two" folds into "ir: one"
+    dlg.setMessage(1, "ir: one and two combined\n\nSquashed by test.")
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert _logSummaries(rw.repo, 2) == ["ir: three", "ir: one and two combined"]
+    combined = rw.repo.peel_commit(rw.repo.head_commit_id).parents[0]
+    assert "Squashed by test." in combined.message
+    assert "one.txt" in combined.tree
+    assert "two.txt" in combined.tree
+
+
+def testInteractiveRebaseFixup(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    dlg = _openTodoDialog(rw, "ir: one")
+    dlg.setAction(1, "fixup")  # "ir: two" melds into "ir: one", message discarded
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert _logSummaries(rw.repo, 2) == ["ir: three", "ir: one"]
+    combined = rw.repo.peel_commit(rw.repo.head_commit_id).parents[0]
+    assert "two.txt" in combined.tree
+
+
+def testInteractiveRebaseReword(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    dlg = _openTodoDialog(rw, "ir: one")
+    dlg.setAction(1, "reword")
+    dlg.setMessage(1, "ir: two (reworded)\n\nMore detail.")
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert _logSummaries(rw.repo, 3) == ["ir: three", "ir: two (reworded)", "ir: one"]
+    reworded = rw.repo.peel_commit(rw.repo.head_commit_id).parents[0]
+    assert "More detail." in reworded.message

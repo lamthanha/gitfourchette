@@ -28,6 +28,7 @@ from gitfourchette.tasks.branchtasks import (
 from gitfourchette.tasks.rebasetasks import (
     AbortRebase,
     ContinueRebase,
+    InteractiveRebase,
     RebaseOnto,
     SkipRebase,
 )

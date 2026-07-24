@@ -5,12 +5,23 @@
 # -----------------------------------------------------------------------------
 
 import logging
+import shlex
+import shutil
+import tempfile
+from pathlib import Path
 
+from gitfourchette.forms.rebasetododialog import RebaseTodoDialog
 from gitfourchette.gitdriver import argsIf
 from gitfourchette.localization import *
 from gitfourchette.nav import NavLocator
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
+from gitfourchette.rebasetodo import (
+    RebaseTodoRow,
+    formatTodoFile,
+    planEditorMessages,
+    validateTodo,
+)
 from gitfourchette.tasks.repotask import AbortTask, RepoTask, TaskEffects, TaskPrereqs
 from gitfourchette.toolbox import *
 
@@ -82,6 +93,126 @@ class RebaseOnto(RepoTask):
             "rebase", *argsIf(autostash, "--autostash"), str(ontoId),
             successStatus=_("Rebased {0} onto {1}.", tquo(branchName), tquo(ontoDisplay)),
             upToDateStatus=_("{0} is already up to date with {1}.", tquo(branchName), tquo(ontoDisplay)))
+
+
+def _writeRebaseScripts(payloadDir: str, todoText: str, editorMessages: list[str]) -> tuple[str, str]:
+    """Write the todo file, the queued editor messages, and two tiny shell
+    scripts into payloadDir. Returns (sequenceEditorPath, messageEditorPath).
+
+    The sequence editor overwrites git's generated todo with ours. The message
+    editor pops msg-N.txt on git's Nth editor invocation (reword/squash
+    prompts); when no payload file exists for an invocation, it leaves the file
+    untouched so git's default message applies (graceful degradation, e.g.
+    after a conflict pause when ContinueRebase runs with GIT_EDITOR=true)."""
+    payload = Path(payloadDir)
+    (payload / "todo.txt").write_text(todoText, "utf-8")
+    for i, message in enumerate(editorMessages, start=1):
+        if message:
+            if not message.endswith("\n"):
+                message += "\n"
+            (payload / f"msg-{i}.txt").write_text(message, "utf-8")
+
+    quotedPayload = shlex.quote(str(payload))
+
+    sequenceEditor = payload / "sequence-editor.sh"
+    sequenceEditor.write_text(
+        "#!/bin/sh\n"
+        f"cat {quotedPayload}/todo.txt > \"$1\"\n",
+        "utf-8")
+    sequenceEditor.chmod(0o700)
+
+    messageEditor = payload / "message-editor.sh"
+    messageEditor.write_text(
+        "#!/bin/sh\n"
+        f"dir={quotedPayload}\n"
+        "n=$(cat \"$dir/counter\" 2>/dev/null || echo 0)\n"
+        "n=$((n + 1))\n"
+        "printf %s \"$n\" > \"$dir/counter\"\n"
+        "if [ -f \"$dir/msg-$n.txt\" ]; then\n"
+        "    cat \"$dir/msg-$n.txt\" > \"$1\"\n"
+        "fi\n",
+        "utf-8")
+    messageEditor.chmod(0o700)
+
+    return str(sequenceEditor), str(messageEditor)
+
+
+class InteractiveRebase(RepoTask):
+    def prereqs(self) -> TaskPrereqs:
+        return TaskPrereqs.NoUnborn | TaskPrereqs.NoConflicts
+
+    def flow(self, fromCommit: Oid):
+        repo = self.repo
+
+        if repo.state() != RepositoryState.NONE:
+            raise AbortTask(_("Conclude the ongoing operation before rebasing."))
+
+        headId = repo.head_commit_id
+        if fromCommit != headId and not repo.descendant_of(headId, fromCommit):
+            raise AbortTask(_("To edit history from this commit, it must be an "
+                              "ancestor of the current HEAD."))
+
+        startCommit = repo.peel_commit(fromCommit)
+        baseId = startCommit.parent_ids[0] if startCommit.parent_ids else None
+
+        yield from self.flowEnterWorkerThread()
+        rows = []
+        flattenedMerges = 0
+        walker = repo.walk(headId, SortMode.TOPOLOGICAL)
+        if baseId is not None:
+            walker.hide(baseId)
+        for commit in walker:
+            if len(commit.parent_ids) > 1:
+                # git rebase -i omits merges from the todo (default flattening)
+                flattenedMerges += 1
+                continue
+            rows.append(RebaseTodoRow(
+                oid=str(commit.id),
+                summary=messageSummary(commit.message)[0],
+                author=commit.author.name,
+                fullMessage=commit.message))
+        repo.refresh_index()
+        dirty = bool(repo.status(untracked_files="no"))
+        yield from self.flowEnterUiThread()
+
+        if not rows:
+            raise AbortTask(_("There are no commits to edit in this range."),
+                            icon="information")
+
+        dlg = RebaseTodoDialog(rows, flattenedMerges, dirty, self.parentWidget())
+        yield from self.flowDialog(dlg)
+        dlg.deleteLater()
+        execRows = dlg.executionRows()
+        autostash = dlg.autostash()
+        assert not validateTodo(execRows), "dialog let an invalid todo through"
+
+        payloadDir = tempfile.mkdtemp(prefix="gitfourchette-rebase-todo-")
+        try:
+            yield from self.flowEnterWorkerThread()
+            sequenceEditor, messageEditor = _writeRebaseScripts(
+                payloadDir, formatTodoFile(execRows), planEditorMessages(execRows))
+            yield from self.flowEnterUiThread()
+
+            env = dict(GIT_NO_EDITOR)
+            env["GIT_SEQUENCE_EDITOR"] = shlex.quote(sequenceEditor)
+            env["GIT_EDITOR"] = shlex.quote(messageEditor)
+
+            targetArgs = ["--root"] if baseId is None else [str(baseId)]
+            yield from _flowRebaseGit(
+                self,
+                "rebase", "--interactive", *argsIf(autostash, "--autostash"), *targetArgs,
+                env=env,
+                successStatus=_("Interactive rebase completed."))
+        finally:
+            shutil.rmtree(payloadDir, ignore_errors=True)
+
+        yield from self.flowEnterWorkerThread()
+        fullySucceeded = repo.state() == RepositoryState.NONE and not repo.any_conflicts
+        newHead = repo.head_commit_id
+        yield from self.flowEnterUiThread()
+
+        if fullySucceeded:
+            self.epilog.jumpTo = NavLocator.inCommit(newHead)
 
 
 def rebaseProgress(repo: Repo) -> tuple[int, int, str]:
@@ -159,14 +290,17 @@ class AbortRebase(_RebaseSequencerTask):
         self.epilog.status = _("Rebase aborted.")
 
 
-def _flowRebaseGit(task: RepoTask, *args: str, successStatus: str, upToDateStatus: str = ""):
+def _flowRebaseGit(task: RepoTask, *args: str, successStatus: str, upToDateStatus: str = "",
+                   env: dict[str, str] | None = None):
     """Run a git rebase command and resolve its outcome. Shared by every
     rebase task; call with `yield from`. A nonzero exit is only an error if
     the repo did NOT end up in (or remain in) a rebase state — otherwise the
     rebase merely paused and the banner takes over."""
     task.epilog.effects |= TaskEffects.Refs | TaskEffects.Head | TaskEffects.Workdir
     oldHead = task.repo.head_commit_id
-    driver = yield from task.flowCallGit(*args, env=dict(GIT_NO_EDITOR), autoFail=False)
+    if env is None:
+        env = dict(GIT_NO_EDITOR)
+    driver = yield from task.flowCallGit(*args, env=env, autoFail=False)
 
     yield from task.flowEnterWorkerThread()
     task.repo.refresh_index()
