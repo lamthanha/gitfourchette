@@ -1232,6 +1232,60 @@ def testRenameBranchAlsoRenamesRemoteBranch(tempDir, mainWindow):
         assert "no-parent" not in bareRepo.branches.local
 
 
+def testRenameBranchThreadedAlsoRenamesRemoteBranch(tempDir, mainWindow, taskThread, monkeypatch):
+    """Regression test: RenameBranch must not touch renameRemoteCheckbox after
+    the dialog has been deleteLater()'d and control has hopped to the worker
+    thread and back. Under ForceSerial (the default in unit tests), the
+    dialog's deferred deletion and the worker-thread hop happen synchronously
+    enough that the race never manifests; taskThread runs the task on a real
+    QThread so the Qt event loop actually gets to process the dialog's
+    deferred deletion while rename_local_branch() is still running."""
+    from gitfourchette.porcelain import Repo
+
+    wd = unpackRepo(tempDir)
+    barePath = makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
+
+    mainWindow.openRepo(wd)
+    rw = waitForRepoWidget(mainWindow)
+    waitUntilTrue(lambda: not rw.taskRunner.isBusy())
+    assert rw.repo.branches.local["no-parent"].upstream_name == "refs/remotes/localfs/no-parent"
+
+    # Make the worker-thread hop slow and deterministic so that the UI event
+    # loop gets a chance to process the dialog's deferred deletion (posted
+    # right after flowDialog() returns) before the flow resumes on the UI
+    # thread and (pre-fix) touches the now-dead checkbox.
+    realRenameLocalBranch = Repo.rename_local_branch
+
+    def delayedRenameLocalBranch(self, *args, **kwargs):
+        import time
+        time.sleep(0.5)
+        return realRenameLocalBranch(self, *args, **kwargs)
+
+    monkeypatch.setattr(Repo, "rename_local_branch", delayedRenameLocalBranch)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^rename")
+
+    dlg = waitForQDialog(rw, r"rename.+branch")
+    checkbox: QCheckBox = dlg.findChild(QCheckBox)
+    assert checkbox is not None
+    assert re.search(r"also rename.+localfs/no-parent", checkbox.text(), re.I)
+    checkbox.setChecked(True)
+    dlg.findChild(QLineEdit).setText("renamed-both")
+    dlg.accept()
+
+    waitUntilTrue(lambda: not rw.taskRunner.isBusy())
+
+    assert "renamed-both" in rw.repo.branches.local
+    assert "no-parent" not in rw.repo.branches.local
+    assert "localfs/renamed-both" in rw.repo.branches.remote
+    assert "localfs/no-parent" not in rw.repo.branches.remote
+    assert rw.repo.branches.local["renamed-both"].upstream_name == "refs/remotes/localfs/renamed-both"
+    with RepoContext(barePath) as bareRepo:
+        assert "renamed-both" in bareRepo.branches.local
+        assert "no-parent" not in bareRepo.branches.local
+
+
 def testRenameBranchUncheckedLeavesRemoteAlone(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
@@ -1248,6 +1302,46 @@ def testRenameBranchUncheckedLeavesRemoteAlone(tempDir, mainWindow):
     assert "localfs/no-parent" in rw.repo.branches.remote
     # Local rename preserves the upstream config, still pointing at the old remote branch
     assert rw.repo.branches.local["local-only"].upstream_name == "refs/remotes/localfs/no-parent"
+
+
+def testRenameBranchAlsoRenamesRemoteBranchAbortsOnRemoteNameCollision(tempDir, mainWindow):
+    """Regression test: the non-interactive RenameRemoteBranch path (chained
+    from RenameBranch's "also rename on remote" checkbox) must validate the
+    new name against existing remote branches, just like the interactive
+    dialog path does. Otherwise a name collision with an unrelated existing
+    remote branch would silently overwrite it on a fast-forwardable push."""
+    wd = unpackRepo(tempDir)
+    # Create an extra branch that will exist on the remote but not locally,
+    # so renaming "no-parent" to its name doesn't trip the *local* branch
+    # name validator (a different, unrelated check) before we even get to
+    # RenameRemoteBranch's guard.
+    runShellScript("git branch collision-target no-parent", wd)
+    barePath = makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
+    runShellScript("git branch -D collision-target", wd)
+
+    rw = mainWindow.openRepo(wd)
+    assert "collision-target" not in rw.repo.branches.local
+    assert "localfs/collision-target" in rw.repo.branches.remote
+    assert rw.repo.branches.local["no-parent"].upstream_name == "refs/remotes/localfs/no-parent"
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^rename")
+    dlg = findQDialog(rw, r"rename.+branch")
+    dlg.findChild(QCheckBox).setChecked(True)
+    dlg.findChild(QLineEdit).setText("collision-target")
+    dlg.accept()
+
+    acceptQMessageBox(rw, "already taken by another branch")
+
+    # The local rename happens before the remote-name guard, so it went through...
+    assert "collision-target" in rw.repo.branches.local
+    assert "no-parent" not in rw.repo.branches.local
+    # ...but the remote push must have been aborted: the old remote branch is
+    # untouched, and the pre-existing "localfs/collision-target" is untouched too.
+    assert "localfs/no-parent" in rw.repo.branches.remote
+    with RepoContext(barePath) as bareRepo:
+        assert "no-parent" in bareRepo.branches.local
+        assert "collision-target" in bareRepo.branches.local
 
 
 def testRenameBranchWithoutUpstreamHasNoCheckbox(tempDir, mainWindow):

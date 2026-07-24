@@ -54,8 +54,6 @@ def defaultCollapseCache(repoModel) -> set[str]:
     """Collapse hashes to prime a repo whose sidebar was never opened before:
     tags and every remote's subtree, except the tracked remote's (the current
     branch's upstream remote; falling back to 'origin', then the first remote)."""
-    from contextlib import suppress
-
     remotes = list(repoModel.remotes)
     tracked = ""
     with suppress(KeyError, AttributeError, GitError):
@@ -668,6 +666,8 @@ class SidebarModel(QAbstractItemModel):
             refName = node.data
             branchName = refName.removeprefix(RefPrefix.HEADS)
             if displayRole:
+                if node.parent.kind == SidebarItem.StarredHeader:
+                    return node.displayName
                 if not BRANCH_FOLDERS:
                     return branchName
                 return branchName.rsplit("/", 1)[-1]
@@ -754,6 +754,8 @@ class SidebarModel(QAbstractItemModel):
             shorthand = refName.removeprefix(RefPrefix.REMOTES)
             remoteName, branchName = split_remote_branch_shorthand(shorthand)
             if displayRole:
+                if node.parent.kind == SidebarItem.StarredHeader:
+                    return node.displayName
                 if not BRANCH_FOLDERS:
                     return branchName
                 return branchName.rsplit("/", 1)[-1]

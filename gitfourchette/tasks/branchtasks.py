@@ -110,8 +110,16 @@ class RenameBranch(RepoTask):
             dlg.setExtraWidget(renameRemoteCheckbox)
 
         yield from self.flowDialog(dlg)
-        dlg.deleteLater()
+
+        # Capture widget state before deleteLater() -- once we hop to the
+        # worker thread below, the UI event loop may process the dialog's
+        # deferred deletion (and that of its reparented extra widget) before
+        # the flow resumes on the UI thread. Touching renameRemoteCheckbox
+        # after the hop would then hit a dead C++ object.
         newBranchName = dlg.lineEdit.text()
+        alsoRenameRemote = renameRemoteCheckbox is not None and renameRemoteCheckbox.isChecked()
+        upstreamShorthand = upstream.shorthand if upstream is not None else ""
+        dlg.deleteLater()
 
         # Bail if identical to dodge AlreadyExistsError
         if newBranchName == oldBranchName:
@@ -125,9 +133,9 @@ class RenameBranch(RepoTask):
         self.epilog.status = _("Branch {0} renamed to {1}.", tquo(oldBranchName), tquo(newBranchName))
 
         yield from self.flowEnterUiThread()
-        if renameRemoteCheckbox is not None and renameRemoteCheckbox.isChecked():
+        if alsoRenameRemote:
             from gitfourchette.tasks.nettasks import RenameRemoteBranch
-            yield from self.flowSubtask(RenameRemoteBranch, upstream.shorthand, newBranchName)
+            yield from self.flowSubtask(RenameRemoteBranch, upstreamShorthand, newBranchName)
 
 
 class RenameBranchFolder(RepoTask):

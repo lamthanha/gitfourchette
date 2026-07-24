@@ -118,6 +118,18 @@ class RenameRemoteBranch(RepoTask):
 
             # Naked name, NOT prefixed with the name of the remote
             newBranchName = dlg.lineEdit.text()
+        else:
+            # Non-interactive path (e.g. chained from RenameBranch's "also
+            # rename on remote" checkbox): the interactive path above checks
+            # the new name against existing remote branches, but a caller-
+            # supplied name bypasses that dialog entirely. Without this
+            # check, a name that collides with an unrelated existing remote
+            # branch would silently overwrite it on a fast-forwardable push.
+            reservedNames = self.repo.listall_remote_branches().get(remoteName, [])
+            if newBranchName in reservedNames:
+                message = _("Can’t rename branch on remote {0}: {1} is already taken by another branch.",
+                            bquo(remoteName), tquo(newBranchName))
+                raise AbortTask(message)
 
         oldShorthand = remoteBranchShorthand
 

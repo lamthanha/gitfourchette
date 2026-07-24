@@ -792,6 +792,7 @@ def testSidebarCollapseDefaultsPrimeOnlyOnce(tempDir, mainWindow):
 
 def testStarBranch(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
+    runShellScript("git branch folder/branchname master", wd)
     rw = mainWindow.openRepo(wd)
 
     # No Starred section while nothing is starred
@@ -800,19 +801,33 @@ def testStarBranch(tempDir, mainWindow):
     node = rw.sidebar.findNodeByRef("refs/heads/master")
     triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^star branch")
 
+    folderNode = rw.sidebar.findNodeByRef("refs/heads/folder/branchname")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(folderNode), r"^star branch")
+
     starRoot = rw.sidebar.findNodeByKind(SidebarItem.StarredHeader)
-    assert [child.data for child in starRoot.children] == ["refs/heads/master"]
+    assert {child.data for child in starRoot.children} == {"refs/heads/master", "refs/heads/folder/branchname"}
     assert starRoot.children[0].kind == SidebarItem.LocalBranch
 
     # Canonical node lookup unaffected: findNodeByRef resolves OUTSIDE Starred
     canonical = rw.sidebar.findNodeByRef("refs/heads/master")
     assert canonical.parent.kind != SidebarItem.StarredHeader
 
+    # A starred branch nested in a folder must show its full path (not just
+    # the last path segment) so it isn't confused with another branch of the
+    # same leaf name elsewhere in the tree.
+    folderAlias = next(c for c in starRoot.children if c.data == "refs/heads/folder/branchname")
+    assert folderAlias.displayName == "folder/branchname"
+    folderAliasIndex = rw.sidebar.nodeToFilterIndex(folderAlias)
+    assert folderAliasIndex.data(Qt.ItemDataRole.DisplayRole) == "folder/branchname"
+
     # The alias carries a fully functional branch menu; unstar via the alias
-    alias = starRoot.children[0]
-    menu = rw.sidebar.makeNodeMenu(alias)
+    masterAlias = next(c for c in starRoot.children if c.data == "refs/heads/master")
+    menu = rw.sidebar.makeNodeMenu(masterAlias)
     assert findMenuAction(menu, r"switch to")
     triggerMenuAction(menu, r"^unstar branch")
+
+    # Unstar the remaining folder branch via its (freshly looked-up) canonical node
+    triggerMenuAction(rw.sidebar.makeNodeMenu(rw.sidebar.findNodeByRef("refs/heads/folder/branchname")), r"^unstar branch")
     assert not rw.sidebar.findNodesByKind(SidebarItem.StarredHeader)
 
 
@@ -828,6 +843,11 @@ def testStarRemoteBranch(tempDir, mainWindow):
     assert alias.kind == SidebarItem.RemoteBranch
     assert alias.data == "refs/remotes/origin/master"
     assert alias.displayName == "origin/master"
+
+    # displayRole through the model must show the full "remote/branch" shorthand,
+    # not just the last path segment ("master" alone would be ambiguous).
+    aliasIndex = rw.sidebar.nodeToFilterIndex(alias)
+    assert aliasIndex.data(Qt.ItemDataRole.DisplayRole) == "origin/master"
 
 
 def testStarredBranchPersistsAcrossReopen(tempDir, mainWindow):
