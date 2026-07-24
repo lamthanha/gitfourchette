@@ -595,6 +595,7 @@ class RepoWidget(QWidget):
         repo = self.repo
 
         rstate = repo.state() if repo else RepositoryState.NONE
+        from gitfourchette.tasks.rebasetasks import REBASE_STATES, rebaseProgress
 
         bannerTitle = TrTables.enum(rstate) if rstate != RepositoryState.NONE else ""
         bannerText = ""
@@ -651,8 +652,7 @@ class RepoWidget(QWidget):
                 bannerAction = englishTitleCase(_("Reset index"))
                 bannerCallback = abortMerge
 
-        elif rstate in (RepositoryState.REBASE, RepositoryState.REBASE_INTERACTIVE, RepositoryState.REBASE_MERGE):
-            from gitfourchette.tasks.rebasetasks import rebaseProgress
+        elif rstate in REBASE_STATES:
             step, total, rebasingBranch = rebaseProgress(repo)
             bannerTitle = _("Rebasing {0}", bquo(rebasingBranch)) if rebasingBranch else _("Rebasing")
             if step and total:

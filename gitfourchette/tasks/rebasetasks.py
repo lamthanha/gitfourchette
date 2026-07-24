@@ -111,8 +111,13 @@ class _RebaseSequencerTask(RepoTask):
 class ContinueRebase(_RebaseSequencerTask):
     def flow(self):
         self.checkRebasing()
+
+        yield from self.flowEnterWorkerThread()
         self.repo.refresh_index()
-        if self.repo.any_conflicts:
+        anyConflicts = self.repo.any_conflicts
+        yield from self.flowEnterUiThread()
+
+        if anyConflicts:
             raise AbortTask(_("Fix merge conflicts before continuing the rebase."))
 
         yield from _flowRebaseGit(self, "rebase", "--continue", successStatus=_("Rebase completed."))
