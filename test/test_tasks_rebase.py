@@ -91,3 +91,87 @@ def testRebaseOntoConflict(tempDir, mainWindow):
         RepositoryState.REBASE_INTERACTIVE,
         RepositoryState.REBASE_MERGE)
     assert rw.repo.any_conflicts
+
+
+def _bannerButton(rw, pattern: str):
+    # Newly-added banner buttons need one event loop tick before Qt marks
+    # them visible (same as pre-existing merge/cherry-pick/revert banner
+    # buttons) -- pump the queue so isVisibleTo() reflects the real state.
+    QTest.qWait(0)
+    return next(b for b in rw.mergeBanner.buttons
+                if re.search(pattern, b.text(), re.I) and b.isVisibleTo(rw))
+
+
+def _startConflictedRebase(tempDir, mainWindow):
+    wd = makeDivergentBranches(tempDir)
+    rw = mainWindow.openRepo(wd)
+    masterTip = rw.repo.branches.local["master"].target
+    rw.jump(NavLocator.inCommit(masterTip))
+    triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
+    acceptQMessageBox(rw, r"rebase.+feature.+onto")
+    assert rw.repo.state() in REBASE_STATES_FOR_TESTS
+    assert rw.mergeBanner.isVisibleTo(rw)
+    assert re.search(r"rebasing", rw.mergeBanner.label.text(), re.I)
+    return rw
+
+
+REBASE_STATES_FOR_TESTS = (
+    RepositoryState.REBASE,
+    RepositoryState.REBASE_INTERACTIVE,
+    RepositoryState.REBASE_MERGE)
+
+
+def testRebaseConflictBannerAndAbort(tempDir, mainWindow):
+    rw = _startConflictedRebase(tempDir, mainWindow)
+    oldFeatureTip = rw.repo.branches.local["feature"].target
+
+    _bannerButton(rw, r"abort").click()
+    acceptQMessageBox(rw, r"abort.+rebase")
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert not rw.mergeBanner.isVisibleTo(rw)
+    assert rw.repo.branches.local["feature"].target == oldFeatureTip
+
+
+def testRebaseConflictResolveAndContinue(tempDir, mainWindow):
+    rw = _startConflictedRebase(tempDir, mainWindow)
+    masterTip = rw.repo.branches.local["master"].target
+
+    # Resolve the conflict by taking THEIRS (the feature branch's version)
+    rw.jump(NavLocator.inUnstaged("clash.txt"))
+    assert rw.conflictView.isVisibleTo(rw)
+    rw.conflictView.ui.theirsButton.click()
+
+    _bannerButton(rw, r"continue").click()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    newTip = rw.repo.peel_commit(rw.repo.branches.local["feature"].target)
+    assert newTip.message.startswith("feature: own file")
+    # Rebased chain sits on top of master's tip
+    assert newTip.parents[0].parents[0].id == masterTip
+
+
+def testRebaseSkipCommit(tempDir, mainWindow):
+    rw = _startConflictedRebase(tempDir, mainWindow)
+    masterTip = rw.repo.branches.local["master"].target
+
+    _bannerButton(rw, r"skip").click()
+    acceptQMessageBox(rw, r"skip")
+
+    assert rw.repo.state() == RepositoryState.NONE
+    newTip = rw.repo.peel_commit(rw.repo.branches.local["feature"].target)
+    # The conflicting commit was skipped; only "feature: own file" remains
+    assert newTip.message.startswith("feature: own file")
+    assert newTip.parents[0].id == masterTip
+
+
+def testRebaseStartedOutsideApp(tempDir, mainWindow):
+    wd = makeDivergentBranches(tempDir)
+    runShellScript("git rebase master || true", wd)
+    rw = mainWindow.openRepo(wd)
+
+    assert rw.repo.state() in REBASE_STATES_FOR_TESTS
+    assert rw.mergeBanner.isVisibleTo(rw)
+    assert re.search(r"rebasing", rw.mergeBanner.label.text(), re.I)
+    for pattern in (r"continue", r"skip", r"abort"):
+        assert _bannerButton(rw, pattern) is not None

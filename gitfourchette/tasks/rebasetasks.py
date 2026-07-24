@@ -73,6 +73,74 @@ class RebaseOnto(RepoTask):
             successStatus=_("Rebased {0} onto {1}.", tquo(branchName), tquo(ontoDisplay)))
 
 
+def rebaseProgress(repo: Repo) -> tuple[int, int, str]:
+    """Return (step, total, branchShorthand) for the rebase in progress.
+    Zeros/empty string when unknown."""
+    from pathlib import Path
+    from contextlib import suppress
+
+    for stateDir, stepFile, endFile in (
+            ("rebase-merge", "msgnum", "end"),
+            ("rebase-apply", "next", "last")):
+        base = Path(repo.in_gitdir(stateDir, common=False))
+        if not base.is_dir():
+            continue
+
+        def read(name: str) -> str:
+            with suppress(OSError):
+                return (base / name).read_text("utf-8").strip()
+            return ""
+
+        with suppress(ValueError):
+            step = int(read(stepFile) or 0)
+            total = int(read(endFile) or 0)
+            headName = read("head-name")
+            branch = RefPrefix.split(headName)[1] if headName else ""
+            return step, total, branch
+    return 0, 0, ""
+
+
+class _RebaseSequencerTask(RepoTask):
+    """Base class for continue/skip/abort."""
+
+    def checkRebasing(self):
+        if self.repo.state() not in REBASE_STATES:
+            raise AbortTask(_("No rebase is in progress."), icon="information")
+
+
+class ContinueRebase(_RebaseSequencerTask):
+    def flow(self):
+        self.checkRebasing()
+        self.repo.refresh_index()
+        if self.repo.any_conflicts:
+            raise AbortTask(_("Fix merge conflicts before continuing the rebase."))
+
+        yield from _flowRebaseGit(self, "rebase", "--continue", successStatus=_("Rebase completed."))
+
+
+class SkipRebase(_RebaseSequencerTask):
+    def flow(self):
+        self.checkRebasing()
+        yield from self.flowConfirm(
+            text=_("Do you want to skip the current commit and continue the rebase?"),
+            verb=_("Skip"))
+
+        yield from _flowRebaseGit(self, "rebase", "--skip", successStatus=_("Rebase completed."))
+
+
+class AbortRebase(_RebaseSequencerTask):
+    def flow(self):
+        self.checkRebasing()
+        yield from self.flowConfirm(
+            text=_("Do you want to abort the rebase and return the branch to its previous state?"),
+            verb=_("Abort rebase"),
+            icon="warning")
+
+        self.epilog.effects |= TaskEffects.Refs | TaskEffects.Head | TaskEffects.Workdir
+        yield from self.flowCallGit("rebase", "--abort", env=dict(GIT_NO_EDITOR))
+        self.epilog.status = _("Rebase aborted.")
+
+
 def _flowRebaseGit(task: RepoTask, *args: str, successStatus: str):
     """Run a git rebase command and resolve its outcome. Shared by every
     rebase task; call with `yield from`. A nonzero exit is only an error if

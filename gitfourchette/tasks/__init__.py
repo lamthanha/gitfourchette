@@ -26,7 +26,10 @@ from gitfourchette.tasks.branchtasks import (
     SwitchBranch,
 )
 from gitfourchette.tasks.rebasetasks import (
+    AbortRebase,
+    ContinueRebase,
     RebaseOnto,
+    SkipRebase,
 )
 from gitfourchette.tasks.committasks import (
     AmendCommit,

@@ -30,6 +30,7 @@ class TaskBook:
     def retranslate(cls):
         cls.names = {
             tasks.AbortMerge: _("Abort merge"),
+            tasks.AbortRebase: _("Abort rebase"),
             tasks.AbsorbSubmodule: _("Absorb submodule"),
             tasks.AutoFetchRemotes: _("Auto-fetch remotes"),
             tasks.AcceptMergeConflictResolution: _("Accept merge conflict resolution"),
@@ -41,6 +42,7 @@ class TaskBook:
             tasks.ApplyStash: _("Apply stash"),
             tasks.CheckoutCommit: _("Check out commit"),
             tasks.CherrypickCommit: _("Cherry-pick"),
+            tasks.ContinueRebase: _("Continue rebase"),
             tasks.DeleteBranch: _("Delete local branch"),
             tasks.DeleteBranchFolder: _("Delete local branch folder"),
             tasks.DeleteRemote: _("Remove remote"),
@@ -95,6 +97,7 @@ class TaskBook:
             tasks.RevertCommit: _("Revert commit"),
             tasks.SetUpGitIdentity: _("Git identity"),
             tasks.EditRepoSettings: _("Repository settings"),
+            tasks.SkipRebase: _("Skip commit and continue rebase"),
             tasks.StageFiles: _("Stage files"),
             tasks.SwitchBranch: _("Switch to branch"),
             tasks.UpdateSubmodule: _("Update submodule"),

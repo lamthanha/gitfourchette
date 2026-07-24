@@ -601,6 +601,7 @@ class RepoWidget(QWidget):
         bannerHeeded = False
         bannerAction = ""
         bannerCallback = None
+        bannerButtons = []
 
         def abortMerge():
             tasks.AbortMerge.invoke(self)
@@ -650,6 +651,27 @@ class RepoWidget(QWidget):
                 bannerAction = englishTitleCase(_("Reset index"))
                 bannerCallback = abortMerge
 
+        elif rstate in (RepositoryState.REBASE, RepositoryState.REBASE_INTERACTIVE, RepositoryState.REBASE_MERGE):
+            from gitfourchette.tasks.rebasetasks import rebaseProgress
+            step, total, rebasingBranch = rebaseProgress(repo)
+            bannerTitle = _("Rebasing {0}", bquo(rebasingBranch)) if rebasingBranch else _("Rebasing")
+            if step and total:
+                bannerTitle += f" ({step}/{total})"
+
+            if not repo.any_conflicts:
+                bannerText += _("Continue the rebase to proceed.")
+                bannerHeeded = True
+            else:
+                bannerText += _("Conflicts need fixing.")
+
+            # Insertion order is reversed by Banner.addButton; add Abort first
+            # so the visual order is Continue, Skip, Abort.
+            bannerButtons = [
+                (englishTitleCase(_("Abort rebase")), lambda: tasks.AbortRebase.invoke(self)),
+                (englishTitleCase(_("Skip")), lambda: tasks.SkipRebase.invoke(self)),
+                (englishTitleCase(_("Continue")), lambda: tasks.ContinueRebase.invoke(self)),
+            ]
+
         else:
             bannerTitle = _("Warning")
             bannerText = _(
@@ -662,6 +684,8 @@ class RepoWidget(QWidget):
                 self.mergeBanner.popUp(bannerTitle, bannerText, heeded=bannerHeeded, canDismiss=False)
                 if bannerAction:
                     self.mergeBanner.addButton(bannerAction, bannerCallback)
+                for buttonText, buttonCallback in bannerButtons:
+                    self.mergeBanner.addButton(buttonText, buttonCallback)
             else:
                 self.mergeBanner.setVisible(False)
 
