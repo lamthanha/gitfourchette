@@ -79,6 +79,7 @@ class GFApplication(QApplication):
         # Don't use app.setOrganizationName because it changes QStandardPaths.
         self.setApplicationName(APP_SYSTEM_NAME)  # used by QStandardPaths
         self.setApplicationDisplayName(APP_DISPLAY_NAME)  # user-friendly name
+        self.setDesktopFileName("forkette")  # Wayland app_id → forkette.desktop (taskbar icon)
         self.setApplicationVersion(APP_VERSION)
         self.setDesktopFileName(APP_IDENTIFIER)  # Wayland uses this to resolve window icons
 

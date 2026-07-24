@@ -245,7 +245,11 @@ class Sidebar(QTreeView):
                     RebaseOnto,
                     _("Rebase {0} &onto {1}…", activeBranchDisplay, thisBranchDisplay),
                     taskArgs=refName,
-                ).replace(enabled=not isCurrentBranch and bool(activeBranchName)),
+                    # Unlike Switch, rebasing onto this branch never touches its
+                    # checkout, so it's fine if it's checked out in another
+                    # worktree (is_checked_out is worktree-wide) — only rebasing
+                    # onto the branch we're standing on makes no sense.
+                ).replace(enabled=branchName != activeBranchName and bool(activeBranchName)),
 
                 ActionDef.SEPARATOR,
 

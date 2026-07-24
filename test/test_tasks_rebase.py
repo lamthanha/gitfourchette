@@ -229,3 +229,17 @@ def testRebaseOntoFromSidebar(tempDir, mainWindow):
     assert rw.repo.state() in REBASE_STATES_FOR_TESTS
     # HEAD sits at the rebase target while paused on the first replayed commit
     assert rw.repo.head_commit_id == masterTip
+
+
+def testRebaseOntoBranchCheckedOutInOtherWorktree(tempDir, mainWindow):
+    # Rebasing onto a branch never touches that branch's checkout, so the
+    # sidebar entry must stay enabled even when the target branch is checked
+    # out in a linked worktree (pygit2's is_checked_out is worktree-wide).
+    wd = makeDivergentBranches(tempDir)
+    runShellScript("git worktree add ../linked-wt master", wd)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/master")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"rebase.+feature.+onto")
+    acceptQMessageBox(rw, r"rebase.+feature.+onto.+master")
+    assert rw.repo.state() in REBASE_STATES_FOR_TESTS
