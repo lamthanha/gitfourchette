@@ -55,8 +55,8 @@ def testRebaseOntoClean(tempDir, mainWindow):
     oldFeatureTip = rw.repo.branches.local["feature"].target
 
     rw.jump(NavLocator.inCommit(masterTip))
+    # Clean worktree: Fork-style flow rebases immediately, no confirm dialog
     triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
-    acceptQMessageBox(rw, r"rebase.+feature.+onto")
 
     assert rw.repo.state() == RepositoryState.NONE
     newTip = rw.repo.branches.local["feature"].target
@@ -84,7 +84,6 @@ def testRebaseOntoConflict(tempDir, mainWindow):
 
     rw.jump(NavLocator.inCommit(masterTip))
     triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
-    acceptQMessageBox(rw, r"rebase.+feature.+onto")
 
     assert rw.repo.state() in (
         RepositoryState.REBASE,
@@ -108,7 +107,6 @@ def _startConflictedRebase(tempDir, mainWindow):
     masterTip = rw.repo.branches.local["master"].target
     rw.jump(NavLocator.inCommit(masterTip))
     triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
-    acceptQMessageBox(rw, r"rebase.+feature.+onto")
     assert rw.repo.state() in REBASE_STATES_FOR_TESTS
     assert rw.mergeBanner.isVisibleTo(rw)
     assert re.search(r"rebasing", rw.mergeBanner.label.text(), re.I)
@@ -223,7 +221,6 @@ def testRebaseOntoFromSidebar(tempDir, mainWindow):
 
     node = rw.sidebar.findNodeByRef("refs/heads/master")
     triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"rebase.+feature.+onto")
-    acceptQMessageBox(rw, r"rebase.+feature.+onto.+master")
 
     # Divergent scenario conflicts, so we should now be mid-rebase
     assert rw.repo.state() in REBASE_STATES_FOR_TESTS
@@ -241,5 +238,43 @@ def testRebaseOntoBranchCheckedOutInOtherWorktree(tempDir, mainWindow):
 
     node = rw.sidebar.findNodeByRef("refs/heads/master")
     triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"rebase.+feature.+onto")
-    acceptQMessageBox(rw, r"rebase.+feature.+onto.+master")
     assert rw.repo.state() in REBASE_STATES_FOR_TESTS
+
+
+def testRebaseDirtyShowsDialogAndAutostashReapplies(tempDir, mainWindow):
+    # A dirty worktree is the only case that shows the confirm dialog
+    # (Fork-style flow); autostash must reapply the changes after the rebase.
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch master
+        echo "notes" > notes.txt
+        git add notes.txt
+        git commit -m "base: notes"
+        git switch -c feature
+        echo "feature only" > feature.txt
+        git add feature.txt
+        git commit -m "feature: own file"
+        git switch master
+        echo "master only" > master.txt
+        git add master.txt
+        git commit -m "master: own file"
+        git switch feature
+        echo "notes dirty" > notes.txt
+        """,
+        wd)
+    rw = mainWindow.openRepo(wd)
+    masterTip = rw.repo.branches.local["master"].target
+
+    rw.jump(NavLocator.inCommit(masterTip))
+    triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
+    acceptQMessageBox(rw, r"rebase.+feature.+onto")
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert not rw.repo.any_conflicts
+    newTip = rw.repo.peel_commit(rw.repo.branches.local["feature"].target)
+    assert newTip.message.startswith("feature: own file")
+    assert newTip.parents[0].id == masterTip
+    # The dirty change survived the autostash round-trip; no stash left behind
+    assert readFile(f"{wd}/notes.txt").decode() == "notes dirty\n"
+    assert len(rw.repo.listall_stashes()) == 0

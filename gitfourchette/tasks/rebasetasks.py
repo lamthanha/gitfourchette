@@ -59,13 +59,23 @@ class RebaseOnto(RepoTask):
                   "beyond {1}.", bquo(branchName), bquo(ontoDisplay)),
                 icon="information")
 
-        autostashCheckbox = QCheckBox(_("Autostash (stash uncommitted changes, then reapply them)"))
-        autostashCheckbox.setChecked(True)
-        text = paragraphs(
-            _("Do you want to rebase {0} onto {1}?", bquo(branchName), bquo(ontoDisplay)),
-            _n("{n} commit will be replayed.", "{n} commits will be replayed.", n=ahead))
-        yield from self.flowConfirm(text=text, verb=_("Rebase"), checkbox=autostashCheckbox)
-        autostash = autostashCheckbox.isChecked()
+        # Fork-style flow: a clean worktree rebases immediately; only prompt
+        # (with the autostash option) when there's something to stash.
+        yield from self.flowEnterWorkerThread()
+        repo.refresh_index()
+        dirty = bool(repo.status(untracked_files="no"))
+        yield from self.flowEnterUiThread()
+
+        autostash = False
+        if dirty:
+            autostashCheckbox = QCheckBox(_("Autostash (stash uncommitted changes, then reapply them)"))
+            autostashCheckbox.setChecked(True)
+            text = paragraphs(
+                _("Do you want to rebase {0} onto {1}?", bquo(branchName), bquo(ontoDisplay)),
+                _n("{n} commit will be replayed.", "{n} commits will be replayed.", n=ahead),
+                _("You have uncommitted changes."))
+            yield from self.flowConfirm(text=text, verb=_("Rebase"), checkbox=autostashCheckbox)
+            autostash = autostashCheckbox.isChecked()
 
         yield from _flowRebaseGit(
             self,
