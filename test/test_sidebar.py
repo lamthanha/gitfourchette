@@ -10,7 +10,7 @@ import re
 from gitfourchette.nav import NavLocator
 from gitfourchette.repomodel import UC_FAKEID
 from gitfourchette.sidebar.sidebarmodel import SidebarItem, SidebarModel
-from gitfourchette.sidebar.sidebardelegate import SidebarDelegate, SidebarClickZone, EYE_WIDTH, STAR_WIDTH, PADDING
+from gitfourchette.sidebar.sidebardelegate import SidebarDelegate, SidebarClickZone, EYE_WIDTH, STAR_WIDTH, PADDING, CHILD_EXTRA_INDENT
 from gitfourchette.toolbox import naturalSort
 from .util import *
 
@@ -1367,3 +1367,19 @@ def testStarPaintDoesNotCollideWithIndicatorsOrHideZone(tempDir, mainWindow, mon
     assert eyeIdle is not None, "explicitly-hidden row should draw an eye when idle"
     assert eyeHover is not None
     assert eyeIdle == eyeHover, f"eye moved on hover: idle {eyeIdle} vs hover {eyeHover}"
+
+
+def testSecondLevelRowsIndentDeeperThanHeaders(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    sb = rw.sidebar
+
+    headerNode = sb.sidebarModel.rootNode.findChild(SidebarItem.LocalBranchesHeader)
+    branchNode = sb.findNodeByRef("refs/heads/master")
+
+    headerRect = sb.visualRect(sb.nodeToFilterIndex(headerNode))
+    branchRect = sb.visualRect(sb.nodeToFilterIndex(branchNode))
+
+    # Fork: second-level rows sit CHILD_EXTRA_INDENT px right of their headers
+    # (upstream unindents them a full level, flush with the headers).
+    assert branchRect.left() == headerRect.left() + CHILD_EXTRA_INDENT

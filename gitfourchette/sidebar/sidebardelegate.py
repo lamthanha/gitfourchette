@@ -25,6 +25,10 @@ EXPAND_TRIANGLE_WIDTH = 6
 PADDING = 4
 EYE_WIDTH = 16
 STAR_WIDTH = 16
+# Fork: keep child rows this many px right of their section headers.
+# Upstream unindents UnindentItems a FULL level (flush with headers);
+# we retreat one level minus this margin so the hierarchy stays visible.
+CHILD_EXTRA_INDENT = 8
 
 
 class SidebarClickZone(enum.IntEnum):
@@ -52,7 +56,7 @@ class SidebarDelegate(QStyledItemDelegate):
         if item not in SidebarLayout.UnindentItems:
             return
         unindentLevels = SidebarLayout.UnindentItems[item]
-        unindentPixels = unindentLevels * indentation
+        unindentPixels = unindentLevels * (indentation - CHILD_EXTRA_INDENT)
         return rect.adjust(unindentPixels, 0, 0, 0)
 
     @staticmethod
