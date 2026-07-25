@@ -151,12 +151,7 @@ def _plainColorName(name: str) -> str:
 
 
 def _addStatusRow(menu: QMenu, workdir: str):
-    """
-    Disabled status row stating the effective color and where it comes from.
-    Appended after the palette (not before it) so that findMenuAction's
-    bare-color-name lookups (".../red") keep matching the palette swatch
-    instead of this summary text, which also starts with the color name.
-    """
+    """Disabled first row stating the effective color and where it comes from."""
     color, provenance = _effectiveStatus(workdir)
     if not provenance:
         return
@@ -167,11 +162,11 @@ def _addStatusRow(menu: QMenu, workdir: str):
             text = _("No color — set for this worktree")
     else:
         text = _("{0} — repository color", _plainColorName(color))
-    menu.addSeparator()
     status = menu.addAction(text)
     if color:
         status.setIcon(tabDotIcon(color))
     status.setEnabled(False)
+    menu.addSeparator()
 
 
 def makeTabColorMenus(
@@ -218,6 +213,7 @@ def makeTabColorMenus(
     repoTitle = _("Tab &Color: Repository") if splitMode else _("Tab &Color")
     repoMenu = QMenu(repoTitle, parentMenu)
     repoMenu.setObjectName("MWTabColorMenu")
+    _addStatusRow(repoMenu, workdir)
 
     for name in TAB_PALETTE:
         swatch = repoMenu.addAction(tabDotIcon(name), captions[name])
@@ -230,8 +226,6 @@ def makeTabColorMenus(
     noColor.setChecked(not currentBinding)
     noColor.triggered.connect(lambda: setBinding(""))
 
-    _addStatusRow(repoMenu, workdir)
-
     repoMenu.addSeparator()
     manage = repoMenu.addAction(_("&Manage Tab Colors…"))
     manage.triggered.connect(lambda: openSettings())
@@ -242,6 +236,7 @@ def makeTabColorMenus(
 
     wtMenu = QMenu(_("Tab Color: This &Worktree"), parentMenu)
     wtMenu.setObjectName("MWTabColorWorktreeMenu")
+    _addStatusRow(wtMenu, workdir)
 
     for name in TAB_PALETTE:
         swatch = wtMenu.addAction(tabDotIcon(name), captions[name])
@@ -264,8 +259,6 @@ def makeTabColorMenus(
     inherited.setCheckable(True)
     inherited.setChecked(currentOverride not in TAB_PALETTE and currentOverride != OVERRIDE_NONE)
     inherited.triggered.connect(lambda: setOverride(""))
-
-    _addStatusRow(wtMenu, workdir)
 
     menus.append(wtMenu)
     return menus

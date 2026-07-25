@@ -234,7 +234,7 @@ def testOrphanOverrideKeepsWorktreeMenuOnSingleWorktreeRepo(tempDir, mainWindow)
     assert _tabIconKey(mainWindow, 0) == _dotKey("red")
     # No linked worktrees, but the override must stay visible/clearable from the menu
     menu = mainWindow.generateTabContextMenu(0)
-    assert findMenuAction(menu, "tab color: this worktree/red").isChecked()
+    assert findMenuAction(menu, "tab color: this worktree/^red$").isChecked()
     triggerMenuAction(menu, r"tab color: this worktree/inherited")
     assert _tabIconKey(mainWindow, 0) is None
     # Once cleared, the repo is back to a flat single menu
@@ -268,7 +268,7 @@ def testBindWholeRepoFromMainTab(tempDir, mainWindow):
     # Regenerated menu shows the current binding checked, on both tabs
     for i in range(2):
         menu = mainWindow.generateTabContextMenu(i)
-        assert findMenuAction(menu, "tab color: repository/orange").isChecked()
+        assert findMenuAction(menu, "tab color: repository/^orange$").isChecked()
         assert not findMenuAction(menu, "tab color: repository/no color").isChecked()
 
     # No Color removes the binding and both dots
@@ -312,7 +312,7 @@ def testWorktreeOverride(tempDir, mainWindow):
     assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
     assert _tabIconKey(mainWindow, 1) == _dotKey("blue")
     menu = mainWindow.generateTabContextMenu(1)
-    assert findMenuAction(menu, "tab color: this worktree/blue").isChecked()
+    assert findMenuAction(menu, "tab color: this worktree/^blue$").isChecked()
 
     # Back to Inherited: child follows the binding again
     menu = mainWindow.generateTabContextMenu(1)
