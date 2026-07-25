@@ -255,3 +255,82 @@ def testNewWorktreeGitFailureSurfaced(tempDir, mainWindow):
     dlg.accept()
     acceptQMessageBox(rw, r"already used by worktree|already checked out")
     assert not os.path.isdir(target)
+
+
+def _worktreeNodeByPath(rw, path):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    return rw.sidebar.findNode(
+        lambda n: n.kind == SidebarItem.Worktree and os.path.realpath(n.data) == os.path.realpath(path))
+
+
+def testRemoveWorktreeClean(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+
+    node = _worktreeNodeByPath(rw, linked)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"remove worktree")
+    acceptQMessageBox(rw, r"remove.+worktree")
+
+    assert not os.path.exists(linked)
+    assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 1
+
+
+def testRemoveWorktreeDirtyOffersForce(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    writeFile(os.path.join(linked, "dirty.txt"), "uncommitted\n")
+
+    node = _worktreeNodeByPath(rw, linked)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"remove worktree")
+    acceptQMessageBox(rw, r"remove.+worktree")
+    # git refuses (dirty) -> force prompt
+    acceptQMessageBox(rw, r"force")
+
+    assert not os.path.exists(linked)
+    assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 1
+
+
+def testRemoveWorktreeDirtyForceDeclined(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    writeFile(os.path.join(linked, "dirty.txt"), "uncommitted\n")
+
+    node = _worktreeNodeByPath(rw, linked)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"remove worktree")
+    acceptQMessageBox(rw, r"remove.+worktree")
+    rejectQMessageBox(rw, r"force")
+
+    assert os.path.exists(linked)
+    assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 2
+
+
+def testRemoveMainWorktreeBlocked(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    node = _worktreeNodeByPath(rw, wd)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"remove worktree")
+    acceptQMessageBox(rw, r"main worktree")
+    assert os.path.exists(os.path.normpath(wd))
+
+
+def testRemoveWorktreeOpenInTabBlocked(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    mainWindow.openRepo(linked)  # open the linked worktree's tab
+    mainWindow.tabs.setCurrentIndex(0)
+
+    node = _worktreeNodeByPath(rw, linked)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"remove worktree")
+    acceptQMessageBox(rw, r"close.+tab")
+    assert os.path.exists(linked)
+
+
+def testPruneWorktrees(tempDir, mainWindow):
+    import shutil
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    shutil.rmtree(linked)  # stale admin entry remains
+    rw.refreshRepo()
+    header = rw.sidebar.findNodeByKind(SidebarItem.WorktreesHeader)
+    assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 2  # stale row still listed
+
+    triggerMenuAction(rw.sidebar.makeNodeMenu(header), r"prune worktrees")
+    assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 1

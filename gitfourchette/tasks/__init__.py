@@ -36,6 +36,8 @@ from gitfourchette.tasks.rebasetasks import (
 )
 from gitfourchette.tasks.worktreetasks import (
     NewWorktree,
+    PruneWorktrees,
+    RemoveWorktree,
 )
 from gitfourchette.tasks.committasks import (
     AmendCommit,

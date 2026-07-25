@@ -7,6 +7,8 @@
 # Mutations run the real git binary (flowCallGit); pygit2 stays read-only.
 # -----------------------------------------------------------------------------
 
+import os
+
 from gitfourchette.forms.newworktreedialog import NewWorktreeDialog
 from gitfourchette.localization import *
 from gitfourchette.nav import NavLocator
@@ -48,3 +50,44 @@ class NewWorktree(RepoTask):
             return True
         except AbortTask:
             return False
+
+
+class RemoveWorktree(RepoTask):
+    def flow(self, path: str):
+        mainInfo = next((wt for wt in self.repoModel.worktrees if wt.isMain), None)
+        if mainInfo is not None and os.path.realpath(path) == os.path.realpath(mainInfo.path):
+            raise AbortTask(_("You can’t remove the main worktree."), icon="information")
+
+        from gitfourchette.application import GFApplication
+        mainWindow = GFApplication.instance().mainWindow
+        if mainWindow is not None and mainWindow.tabWidgetForWorkdirPath(path) is not None:
+            raise AbortTask(
+                _("This worktree is open in a tab. Close its tab before removing it."),
+                icon="information")
+
+        yield from self.flowConfirm(
+            text=_("Really remove worktree {0}?", bquo(compactPath(path)))
+                 + "<br>" + _("Its files will be deleted from disk."),
+            verb=_("Remove Worktree"))
+
+        driver = yield from self.flowCallGit("worktree", "remove", path, autoFail=False)
+        if driver.exitCode() != 0:
+            yield from self.flowConfirm(
+                text=_("Git refused to remove this worktree "
+                       "(it may contain uncommitted changes).")
+                     + driver.htmlErrorText()
+                     + _("Force-remove it?"),
+                verb=_("Force Remove"))
+            driver = yield from self.flowCallGit("worktree", "remove", "--force", path, autoFail=False)
+            if driver.exitCode() != 0:
+                raise AbortTask(driver.htmlErrorText())
+
+        self.epilog.effects |= TaskEffects.Refs
+
+
+class PruneWorktrees(RepoTask):
+    def flow(self):
+        driver = yield from self.flowCallGit("worktree", "prune", autoFail=False)
+        if driver.exitCode() != 0:
+            raise AbortTask(driver.htmlErrorText())
+        self.epilog.effects |= TaskEffects.Refs

@@ -550,6 +550,8 @@ class Sidebar(QTreeView):
         elif item == SidebarItem.WorktreesHeader:
             actions += [
                 TaskBook.action(self, NewWorktree, accel="N"),
+                ActionDef.SEPARATOR,
+                TaskBook.action(self, PruneWorktrees, accel="P"),
             ]
 
         elif item == SidebarItem.Worktree:
@@ -557,6 +559,8 @@ class Sidebar(QTreeView):
                 ActionDef(_("&Open Worktree in New Tab"), lambda: self.openWorktreeRepo.emit(data)),
                 ActionDef(_("Open Worktree &Folder"), lambda: openFolder(data)),
                 ActionDef(_("Copy &Path"), lambda: self.copyToClipboard(data)),
+                ActionDef.SEPARATOR,
+                TaskBook.action(self, RemoveWorktree, accel="R", taskArgs=data),
             ]
 
         # --------------------
