@@ -34,6 +34,9 @@ from gitfourchette.tasks.rebasetasks import (
     SkipRebase,
     SquashCommits,
 )
+from gitfourchette.tasks.worktreetasks import (
+    NewWorktree,
+)
 from gitfourchette.tasks.committasks import (
     AmendCommit,
     CheckoutCommit,

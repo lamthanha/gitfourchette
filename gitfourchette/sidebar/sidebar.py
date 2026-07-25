@@ -298,6 +298,8 @@ class Sidebar(QTreeView):
 
                 TaskBook.action(self, NewBranchFromRef, _("New &Branch Here…"), taskArgs=refName),
 
+                TaskBook.action(self, NewWorktree, _("Checkout in New &Worktree…"), taskArgs=branchName),
+
                 ActionDef(_("&Copy Branch Name"), lambda: self.copyToClipboard(branchName)),
 
                 ActionDef.SEPARATOR,
@@ -546,7 +548,9 @@ class Sidebar(QTreeView):
             ]
 
         elif item == SidebarItem.WorktreesHeader:
-            actions += []  # populated by NewWorktree/PruneWorktrees in Tasks 3-4
+            actions += [
+                TaskBook.action(self, NewWorktree, accel="N"),
+            ]
 
         elif item == SidebarItem.Worktree:
             actions += [
@@ -671,6 +675,9 @@ class Sidebar(QTreeView):
 
         elif item == SidebarItem.Worktree:
             self.openWorktreeRepo.emit(node.data)
+
+        elif item == SidebarItem.WorktreesHeader:
+            NewWorktree.invoke(self)
 
         elif item == SidebarItem.StashesHeader:
             NewStash.invoke(self)

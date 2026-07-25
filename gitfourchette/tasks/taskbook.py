@@ -81,6 +81,7 @@ class TaskBook:
             tasks.NewRemote: _("Add remote"),
             tasks.NewStash: _("Stash changes"),
             tasks.NewTag: _("New tag"),
+            tasks.NewWorktree: _("New worktree"),
             tasks.OpenBlame: _("Blame file"),
             tasks.QueryCommitsTouchingPath: _("Find commits touching path"),
             tasks.PullBranch: _("Pull remote branch"),

@@ -178,3 +178,80 @@ def testWorktreeSidebarRefreshAfterExternalChange(tempDir, mainWindow):
     runShellScript("git worktree add ../LinkedWT no-parent", wd)
     rw.refreshRepo()  # autoRefresh path picks up external changes
     assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 2
+
+
+def testNewWorktreeExistingBranch(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    target = os.path.join(tempDir.name, "NewWT")
+
+    header = rw.sidebar.findNodeByKind(SidebarItem.WorktreesHeader)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(header), r"new worktree")
+    dlg = findQDialog(rw, r"new worktree")
+    dlg.setPath(target)
+    dlg.setExistingBranch("no-parent")
+    dlg.accept()
+
+    # Offer to open the new worktree: decline first
+    rejectQMessageBox(rw, r"open.+new tab")
+    assert os.path.isdir(target)
+    assert mainWindow.tabs.count() == 1
+    # Sidebar refreshed with the new row
+    assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 2
+    # The branch is checked out there
+    from gitfourchette import worktrees
+    infos = worktrees.listWorktrees(wd)
+    assert infos[1].branch == "refs/heads/no-parent"
+
+
+def testNewWorktreeNewBranchAndOpenTab(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    target = os.path.join(tempDir.name, "FreshWT")
+
+    header = rw.sidebar.findNodeByKind(SidebarItem.WorktreesHeader)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(header), r"new worktree")
+    dlg = findQDialog(rw, r"new worktree")
+    dlg.setPath(target)
+    dlg.setNewBranch("wtbranch", "master")
+    dlg.accept()
+
+    acceptQMessageBox(rw, r"open.+new tab")
+    assert mainWindow.tabs.count() == 2
+    assert os.path.realpath(mainWindow.currentRepoWidget().workdir) == os.path.realpath(target)
+    assert "wtbranch" in rw.repo.branches.local
+
+
+def testCheckoutBranchInNewWorktreeFromBranchMenu(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    target = os.path.join(tempDir.name, "BranchWT")
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"checkout in new worktree")
+    dlg = findQDialog(rw, r"new worktree")
+    assert not dlg.wantNewBranch()
+    assert dlg.existingBranch() == "no-parent"  # pre-filled from the menu
+    dlg.setPath(target)
+    dlg.accept()
+    rejectQMessageBox(rw, r"open.+new tab")
+
+    from gitfourchette import worktrees
+    assert any(wt.branch == "refs/heads/no-parent" for wt in worktrees.listWorktrees(wd))
+
+
+def testNewWorktreeGitFailureSurfaced(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    target = os.path.join(tempDir.name, "FailWT")
+
+    from gitfourchette.tasks import NewWorktree
+    NewWorktree.invoke(rw)
+    dlg = findQDialog(rw, r"new worktree")
+    dlg.setPath(target)
+    dlg.setExistingBranch("master")  # master is checked out here -> git refuses
+    dlg.accept()
+    acceptQMessageBox(rw, r"already used by worktree|already checked out")
+    assert not os.path.isdir(target)
