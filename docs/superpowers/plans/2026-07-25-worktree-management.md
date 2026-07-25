@@ -36,7 +36,7 @@
 - Context menus: `Sidebar.makeNodeMenu(node)` (`sidebar.py:159-554`) `if/elif` chain; Submodule case at 524-545 is the open-as-tab analog (`self.openSubmoduleRepo.emit(data)`); SubmodulesHeader bulk-action case at 517-522. Stash case shows `TaskBook.action(self, TaskClass, accel="X", taskArgs=...)` usage.
 - Double-click: `Sidebar.wantEnterNode(node)` (632-682); Submodule → `self.openSubmoduleRepo.emit(node.data)`; StashesHeader → `NewStash.invoke(self)`; default `QApplication.beep()`.
 - Open-as-tab chain: `Sidebar.openSubmoduleRepo = Signal(str)` (sidebar.py:36) → connected in `RepoWidget.__init__` (repowidget.py:187) → `RepoWidget.openSubmoduleRepo(key)` (436-438) does `self.openRepo.emit(path, NavLocator())` → MainWindow (mainwindow.py:682) → `openRepoNextTo` (963-967). A `RepoTask` can emit directly: `self.rw.openRepo.emit(path, NavLocator())` (`self.rw` is the RepoWidget, repotask.py:277-283).
-- Refresh: `RepoModel.syncSubmodules()` (repomodel.py:330-340) is the sync template (compute, compare, assign, return changed-bool); primed in `RepoModel.__init__` (~225-226). `RefreshRepo.flow` (jumptasks.py:683-799) calls syncs at 742-759 under effect-flag gates and folds change-bools into `anyChanges` at 778-783 → `rw.sidebar.refresh(repoModel)`. The sync block runs off the UI thread — synchronous subprocess calls are acceptable there.
+- Refresh: `RepoModel.syncSubmodules()` (repomodel.py:330-340) is the sync template (compute, compare, assign, return changed-bool); primed in `RepoModel.__init__` (~225-226). `RefreshRepo.flow` (jumptasks.py:683-799) calls syncs at 742-759 under effect-flag gates and folds change-bools into `anyChanges` at 778-783 → `rw.sidebar.refresh(repoModel)`. CORRECTED (Task 1 review): the sync block runs ON the UI thread (`assert onAppThread()` at flow start, no worker hop before it) — worktree listing therefore rides `flowCallGit` (async ProcessWrapper, 30ms sync cap) like the adjacent `for-each-ref` call; blocking `listWorktrees` is confined to `syncWorktrees()` for tests.
 - `GitDriver.runSync(*args, directory="", strict=False)` (gitdriver/gitdriver.py:61-68) prepends the git binary; returns stdout str, `""` on failure (non-strict). Read-usage template: `GitDriver.runSync(*tokens, directory=self.repo.workdir, strict=True)` (filelists/filelist.py:608-609 — copy that file's import).
 - `flowCallGit(self, *args, customKey="", workdir="", env=None, autoFail=False) -> Generator[..., GitDriver]` (repotask.py:514-524); on failure `raise AbortTask(driver.htmlErrorText())` (rebasetasks.py:411). Effects via `self.epilog.effects |= TaskEffects.Refs | ...` (rebasetasks.py `_flowRebaseGit`). `flowConfirm(text=..., verb=..., ...)` raises `AbortTask("")` when rejected; `flowDialog(dlg)` likewise on rejection.
 - Task registration precedent: rebasetasks import block in `tasks/__init__.py:28-36`; `TaskBook.names` (taskbook.py:31-112) alphabetical by class name; `TaskBook.action(invoker, taskClass, name="", accel="", taskArgs=None, **kwargs)` (taskbook.py:251-287) — `accel="X"` auto-inserts `&` in the auto-generated name.
@@ -148,7 +148,7 @@ def testListWorktreesRealRepo(tempDir, mainWindow):
     runShellScript("git worktree add ../LinkedWT no-parent", wd)
     infos = worktrees.listWorktrees(wd)
     assert len(infos) == 2
-    assert infos[1].branch == "refs/heads/master"
+    assert infos[1].branch == "refs/heads/no-parent"
     assert not infos[1].isMain
 
     # Listing works from the linked worktree too, and not-a-repo yields []
@@ -253,25 +253,40 @@ def listWorktrees(workdir: str) -> list[WorktreeInfo]:
 
 ```python
     def syncWorktrees(self) -> bool:
+        # Blocking (spawns a git subprocess) — never call on the UI thread.
         from gitfourchette.worktrees import listWorktrees
-        fresh = listWorktrees(self.repo.workdir)
+        return self.updateWorktrees(listWorktrees(self.repo.workdir))
+
+    def updateWorktrees(self, fresh: list) -> bool:
         if fresh == self.worktrees:
             return False
         self.worktrees = fresh
         return True
 ```
 
-Prime it in `__init__` right where `syncSubmodules()` is primed (~225-226): initialize `self.worktrees = []` with the other field inits, then call `self.syncWorktrees()` beside `self.syncSubmodules()`. Follow the file's existing style for field declaration vs `__init__` assignment (mirror exactly what `submodules` does).
-
-- [ ] **Step 5: Refresh wiring.** In `gitfourchette/tasks/jumptasks.py`, in `RefreshRepo.flow`'s sync block (~742-759) add alongside the existing syncs:
+Initialize `self.worktrees = []` with the other field inits. Do NOT prime in `__init__` (it runs on the UI thread inside PrimeRepo before the worker hop) — instead prime in `PrimeRepo.flow` beside the existing "ahead-behind" flowCallGit block (loadtasks.py ~91-94):
 
 ```python
-        worktreesChanged = False
-        if effectFlags & (TaskEffects.Refs | TaskEffects.Head):
-            worktreesChanged = repoModel.syncWorktrees()
+        # Fill in worktrees
+        with Benchmark("worktrees"):
+            driver = yield from self.flowCallGit("worktree", "list", "--porcelain", autoFail=False)
+            if driver.exitCode() == 0:
+                repoModel.updateWorktrees(parseWorktreeListPorcelain(driver.stdoutScrollback()))
 ```
 
-and fold `| worktreesChanged` into the `anyChanges = ...` expression (~780).
+- [ ] **Step 5: Refresh wiring.** In `gitfourchette/tasks/jumptasks.py`, in `RefreshRepo.flow`, add:
+
+```python
+        # Refresh worktree list (async git process — a blocking subprocess
+        # wait is not acceptable on the UI thread; keep stale list on failure)
+        worktreesChanged = False
+        if effectFlags & (TaskEffects.Refs | TaskEffects.Head):
+            driver = yield from self.flowCallGit("worktree", "list", "--porcelain", autoFail=False)
+            if driver.exitCode() == 0:
+                worktreesChanged = repoModel.updateWorktrees(parseWorktreeListPorcelain(driver.stdoutScrollback()))
+```
+
+placed AFTER the for-each-ref block (~775), before the sidebar-refresh section, and fold `| worktreesChanged` into the `anyChanges = ...` expression (~784). Import `parseWorktreeListPorcelain` from `gitfourchette.worktrees` in both jumptasks.py and loadtasks.py.
 
 - [ ] **Step 6: Run the new tests**
 

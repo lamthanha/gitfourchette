@@ -32,6 +32,7 @@ from gitfourchette.tasks.loadtasks import LoadPatch, TAbstractDiffDocument
 from gitfourchette.tasks.repotask import AbortTask, RepoTask, TaskEffects, RepoGoneError, FlowControlToken
 from gitfourchette.toolbox import *
 from gitfourchette.trtables import TrTables
+from gitfourchette.worktrees import parseWorktreeListPorcelain
 
 logger = logging.getLogger(__name__)
 
@@ -742,10 +743,6 @@ class RefreshRepo(RepoTask):
         if effectFlags & (TaskEffects.Head | TaskEffects.Workdir):
             submodulesChanged = repoModel.syncSubmodules()
 
-        worktreesChanged = False
-        if effectFlags & (TaskEffects.Refs | TaskEffects.Head):
-            worktreesChanged = repoModel.syncWorktrees()
-
         if effectFlags & (TaskEffects.Refs | TaskEffects.Remotes):
             remotesChanged = repoModel.syncRemotes()
 
@@ -774,6 +771,14 @@ class RefreshRepo(RepoTask):
             with Benchmark("ahead-behind"):
                 driver = yield from self.flowCallGit("for-each-ref", "--format=%(refname:short) %(upstream:track)", "refs/heads")
                 repoModel.aheadBehind = dict(parseAheadBehind(driver.stdoutScrollback()))
+
+        # Refresh worktree list (async git process — a blocking subprocess
+        # wait is not acceptable on the UI thread; keep stale list on failure)
+        worktreesChanged = False
+        if effectFlags & (TaskEffects.Refs | TaskEffects.Head):
+            driver = yield from self.flowCallGit("worktree", "list", "--porcelain", autoFail=False)
+            if driver.exitCode() == 0:
+                worktreesChanged = repoModel.updateWorktrees(parseWorktreeListPorcelain(driver.stdoutScrollback()))
 
         # Schedule a repaint of the entire GraphView if the refs changed
         if effectFlags & (TaskEffects.Head | TaskEffects.Refs):

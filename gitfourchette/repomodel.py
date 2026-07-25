@@ -228,7 +228,7 @@ class RepoModel:
         self.syncMergeheads()
         self.syncStashes()
         self.syncSubmodules()
-        self.syncWorktrees()
+        # (worktrees are primed by PrimeRepo via flowCallGit — see syncWorktrees)
         self.syncRemotes()
         self.syncUpstreams()
 
@@ -346,8 +346,12 @@ class RepoModel:
 
     @benchmark
     def syncWorktrees(self) -> bool:
+        # Blocking (spawns a git subprocess) — never call on the UI thread.
+        # UI paths list via flowCallGit and feed updateWorktrees instead.
         from gitfourchette.worktrees import listWorktrees
-        fresh = listWorktrees(self.repo.workdir)
+        return self.updateWorktrees(listWorktrees(self.repo.workdir))
+
+    def updateWorktrees(self, fresh: list) -> bool:
         if fresh == self.worktrees:
             return False
         self.worktrees = fresh

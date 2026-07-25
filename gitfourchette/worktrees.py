@@ -60,7 +60,12 @@ def parseWorktreeListPorcelain(text: str) -> list[WorktreeInfo]:
 
 
 def listWorktrees(workdir: str) -> list[WorktreeInfo]:
-    """List all worktrees of the repo containing workdir ([] on any git failure)."""
+    """List all worktrees of the repo containing workdir ([] on any git failure).
+
+    Blocking (uncapped synchronous subprocess wait) — never call on the UI
+    thread. UI paths run `worktree list --porcelain` via RepoTask.flowCallGit
+    and feed the output to parseWorktreeListPorcelain/updateWorktrees.
+    """
     stdout = GitDriver.runSync("worktree", "list", "--porcelain", directory=workdir)
     if not stdout:
         return []

@@ -25,6 +25,7 @@ from gitfourchette.qt import *
 from gitfourchette.tasks.repotask import RepoTask, TaskEffects, FlowControlToken, AbortTask
 from gitfourchette.toolbox import *
 from gitfourchette.trtables import TrTables
+from gitfourchette.worktrees import parseWorktreeListPorcelain
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,12 @@ class PrimeRepo(RepoTask):
         with Benchmark("ahead-behind"):
             driver = yield from self.flowCallGit("for-each-ref", "--format=%(refname:short) %(upstream:track)", "refs/heads")
             repoModel.aheadBehind = dict(parseAheadBehind(driver.stdoutScrollback()))
+
+        # Fill in worktrees
+        with Benchmark("worktrees"):
+            driver = yield from self.flowCallGit("worktree", "list", "--porcelain", autoFail=False)
+            if driver.exitCode() == 0:
+                repoModel.updateWorktrees(parseWorktreeListPorcelain(driver.stdoutScrollback()))
 
         # ---------------------------------------------------------------------
         # EXIT UI THREAD
