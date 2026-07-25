@@ -129,6 +129,9 @@ class RepoModel:
     initializedSubmodules: set[str]
     "Set of submodule names that are registered in .gitmodules."
 
+    worktrees: list["WorktreeInfo"]
+    "List of worktrees attached to this repo (from `git worktree list`)."
+
     remotes: list[str]
     "List of remote names."
 
@@ -198,6 +201,7 @@ class RepoModel:
         self.stashes = []
         self.submodules = {}
         self.initializedSubmodules = set()
+        self.worktrees = []
         self.remotes = []
         self.upstreams = {}
         self.aheadBehind = {}  # filled in outside RepoModel (needs git call)
@@ -224,6 +228,7 @@ class RepoModel:
         self.syncMergeheads()
         self.syncStashes()
         self.syncSubmodules()
+        self.syncWorktrees()
         self.syncRemotes()
         self.syncUpstreams()
 
@@ -338,6 +343,15 @@ class RepoModel:
             return True
 
         return False
+
+    @benchmark
+    def syncWorktrees(self) -> bool:
+        from gitfourchette.worktrees import listWorktrees
+        fresh = listWorktrees(self.repo.workdir)
+        if fresh == self.worktrees:
+            return False
+        self.worktrees = fresh
+        return True
 
     @benchmark
     def syncRemotes(self):
