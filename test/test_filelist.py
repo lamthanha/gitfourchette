@@ -376,8 +376,15 @@ def testReevaluateFileListSearchTermAcrossCommits(tempDir, mainWindow):
         # After reevaluation, the 'red' property must be updated
         assert searchBar.isRed() == (not anyHighlighted)
 
-        # Search term reevaluation must not touch the current selection.
-        assert fileList.currentIndex().row() == 0
+        # Fork: the search bar FILTERS the file list, so reevaluation may
+        # narrow this commit's file list down to nothing if none of its
+        # files match the term. When there's a match, the first (and, by
+        # construction, matching) row stays selected; when there's no
+        # match, the filtered-out list leaves nothing selected.
+        if anyHighlighted:
+            assert fileList.currentIndex().row() == 0
+        else:
+            assert not fileList.currentIndex().isValid()
 
         # Move to next commit
         rw.graphView.setFocus()
@@ -888,3 +895,46 @@ def testCantStageMixedSelection(tempDir, mainWindow):
     menu = summonContextMenu(rw.stagedFiles.viewport())
     assert findMenuAction(menu, "can.t unstage this selection in bulk")
     menu.close()
+
+
+def testFileListFilterNarrowsAndRestores(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/apple.txt", "a")
+    writeFile(f"{wd}/banana.txt", "b")
+    writeFile(f"{wd}/cherry.txt", "c")
+    rw = mainWindow.openRepo(wd)
+    dirty = rw.dirtyFiles
+
+    allRows = qlvGetRowData(dirty)
+    assert {"apple.txt", "banana.txt", "cherry.txt"} <= set(allRows)
+
+    # Typing in the search bar narrows the list live (filter, not jump)
+    dirty.searchBar.popUp()
+    QTest.keyClicks(dirty.searchBar.lineEdit, "anan")
+    assert qlvGetRowData(dirty) == ["banana.txt"]
+
+    # Esc hides the bar AND restores the full list
+    QTest.keyPress(dirty.searchBar.lineEdit, Qt.Key.Key_Escape)
+    assert not dirty.searchBar.isVisibleTo(rw)
+    assert set(qlvGetRowData(dirty)) == set(allRows)
+
+    # Re-opening the bar re-applies the retained term
+    dirty.searchBar.popUp()
+    assert qlvGetRowData(dirty) == ["banana.txt"]
+
+
+def testFileListFilterSurvivesRefresh(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/apple.txt", "a")
+    writeFile(f"{wd}/banana.txt", "b")
+    rw = mainWindow.openRepo(wd)
+    dirty = rw.dirtyFiles
+
+    dirty.searchBar.popUp()
+    QTest.keyClicks(dirty.searchBar.lineEdit, "banana")
+    assert qlvGetRowData(dirty) == ["banana.txt"]
+
+    # A workdir refresh (setContents happens on every refresh) keeps the filter
+    writeFile(f"{wd}/bananarama.txt", "b2")
+    rw.refreshRepo()
+    assert set(qlvGetRowData(dirty)) == {"banana.txt", "bananarama.txt"}

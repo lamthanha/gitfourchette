@@ -13,6 +13,7 @@ from gitfourchette import settings
 from gitfourchette.application import GFApplication
 from gitfourchette.exttools.toolprocess import ToolProcess
 from gitfourchette.exttools.usercommand import UserCommand
+from gitfourchette.filelists.filelistfilter import FileListFilter
 from gitfourchette.filelists.filelistmodel import FileListModel
 from gitfourchette.forms.searchbar import SearchBar
 from gitfourchette.gitdriver import *
@@ -21,7 +22,6 @@ from gitfourchette.nav import NavLocator, NavContext, NavFlags
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.repomodel import RepoModel
-from gitfourchette.search.itemviewsearchprovider import ItemViewSearchProvider
 from gitfourchette.settings import FileListClick
 from gitfourchette.tasks import *
 from gitfourchette.tasks.repotask import showMultiFileErrorMessage
@@ -157,7 +157,7 @@ class FileList(QListView):
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)  # prevent editing text after double-clicking
         self.setUniformItemSizes(True)  # potential perf boost with many files
 
-        searchProvider = ItemViewSearchProvider(self)
+        searchProvider = FileListFilter(self)
         searchProvider.dataRole = FileListModel.Role.FilePath
 
         self.searchBar = SearchBar(self, searchProvider)

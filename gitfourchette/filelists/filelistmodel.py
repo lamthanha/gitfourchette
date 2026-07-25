@@ -157,6 +157,12 @@ class FileListModel(QAbstractListModel):
     fileRows: dict[str, int]
     highlightedCounterpartRow: int
 
+    _allDeltas: list[GitDelta]
+    """ Fork: unfiltered backing store; `deltas`/`fileRows` are the filtered view. """
+
+    _filterTerm: str
+    """ Fork: lowercase filter term driven by FileListFilter, or "" if unfiltered. """
+
     navContext: NavContext
     """
     COMMITTED, STAGED or UNSTAGED.
@@ -174,6 +180,7 @@ class FileListModel(QAbstractListModel):
         super().__init__(parent)
         self.navContext = navContext
         self.navLocator = NavLocator.Empty
+        self._rebuildingFilteredRows = False
         self.clear()
 
     @property
@@ -189,23 +196,51 @@ class FileListModel(QAbstractListModel):
     def clear(self):
         self.deltas = []
         self.fileRows = {}
+        self._allDeltas = []
+        self._filterTerm = ""
         self.highlightedCounterpartRow = -1
         self.navLocator = NavLocator.Empty
         self.modelReset.emit()
 
     def setContents(self, deltas: Iterable[GitDelta]):
-        self.beginResetModel()
+        self._allDeltas = sorted(deltas, key=lambda d: naturalSort(d.new.path))
+        self._rebuildFilteredRows()
 
-        self.deltas.clear()
-        self.fileRows.clear()
+    def setFilterTerm(self, term: str):
+        # Fork: Fork.dev-style file list filtering (driven by the search bar).
+        term = term.strip().lower()
+        if term == self._filterTerm:
+            return  # also breaks the reset->reevaluate->setTerm recursion
+        self._filterTerm = term
+        self._rebuildFilteredRows()
 
-        sortedDeltas = sorted(deltas, key=lambda d: naturalSort(d.new.path))
-
-        for delta in sortedDeltas:
-            self.fileRows[delta.new.path] = len(self.deltas)
-            self.deltas.append(delta)
-
-        self.endResetModel()
+    def _rebuildFilteredRows(self):
+        if self._rebuildingFilteredRows:
+            # Fork: beginResetModel() below emits modelAboutToBeReset, which
+            # SearchBar.reevaluateSearchTerm (connected in FileList.__init__)
+            # handles synchronously. If a FileList's clear() ran just before
+            # setContents() (e.g. CommittedFiles, which clears/repopulates on
+            # every commit switch), _filterTerm may be transiently out of sync
+            # with the search bar's real term, so reevaluation calls back into
+            # setFilterTerm() with a genuinely different term while we're still
+            # inside the outer beginResetModel()/endResetModel() bracket. Bail
+            # out of the inner call instead of nesting model resets — the outer
+            # call (still running) will pick up the freshly updated
+            # _filterTerm on its own.
+            return
+        self._rebuildingFilteredRows = True
+        try:
+            self.beginResetModel()
+            self.deltas = []
+            self.fileRows = {}
+            for delta in self._allDeltas:
+                if self._filterTerm and self._filterTerm not in delta.new.path.lower():
+                    continue
+                self.fileRows[delta.new.path] = len(self.deltas)
+                self.deltas.append(delta)
+            self.endResetModel()
+        finally:
+            self._rebuildingFilteredRows = False
 
     def rowCount(self, parent: QModelIndex = QModelIndex_default) -> int:
         return len(self.deltas)
