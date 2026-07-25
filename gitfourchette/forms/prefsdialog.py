@@ -400,8 +400,8 @@ class PrefsDialog(QDialog):
                 presets[_("Built-in git (sandboxed)")] = builtInGit
             presets[_("Auto-detected system git")] = ToolPresets.defaultGit(hostOnly=True)
             return self.strControlWithPresets(key, value, presets)
-        elif key == "tabColorBindings":
-            return self.tabColorBindingsControl(key, value)
+        elif key in ("tabColorBindings", "tabColorOverrides"):
+            return self.tabColorTableControl(key, value)
         elif issubclass(valueType, enum.Enum):
             return self.enumControl(key, value, type(value))
         elif valueType is int:
@@ -686,22 +686,26 @@ class PrefsDialog(QDialog):
         control.activated.connect(onPickStyle)
         return control
 
-    def tabColorBindingsControl(self, prefKey: str, prefValue: dict):
+    def tabColorTableControl(self, prefKey: str, prefValue: dict):
         from gitfourchette.tabcolors import TAB_PALETTE, tabDotIcon
 
         listWidget = QListWidget(self)
-        listWidget.setObjectName("tabColorBindingsList")
+        listWidget.setObjectName(f"{prefKey}List")
         listWidget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         listWidget.setMinimumHeight(120)
 
-        removeButton = QPushButton(_("Remo&ve Selected Binding"), self)
-        removeButton.setObjectName("tabColorBindingsRemove")
+        if prefKey == "tabColorBindings":
+            removeCaption = _("Remo&ve Selected Binding")
+        else:
+            removeCaption = _("Rem&ove Selected Override")
+        removeButton = QPushButton(removeCaption, self)
+        removeButton.setObjectName(f"{prefKey}Remove")
 
         def refill():
             listWidget.clear()
-            bindings = self.getMostRecentValue(prefKey)
-            for path in sorted(bindings):
-                colorName = bindings[path]
+            table = self.getMostRecentValue(prefKey)
+            for path in sorted(table):
+                colorName = table[path]
                 icon = tabDotIcon(colorName) if colorName in TAB_PALETTE else QIcon()
                 item = QListWidgetItem(icon, compactPath(path), listWidget)
                 item.setData(Qt.ItemDataRole.UserRole, path)
@@ -713,9 +717,9 @@ class PrefsDialog(QDialog):
             if item is None:
                 return
             path = item.data(Qt.ItemDataRole.UserRole)
-            newBindings = dict(self.getMostRecentValue(prefKey))
-            newBindings.pop(path, None)
-            self.assign(prefKey, newBindings)
+            newTable = dict(self.getMostRecentValue(prefKey))
+            newTable.pop(path, None)
+            self.assign(prefKey, newTable)
             refill()
 
         removeButton.clicked.connect(onRemove)

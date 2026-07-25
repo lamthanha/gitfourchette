@@ -443,3 +443,45 @@ def testRemoveBindingCancelKeepsBinding(tempDir, mainWindow):
 
     assert settings.prefs.tabColorBindings == {os.path.realpath(wd): "orange"}
     assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
+
+
+def testWorktreeOverridesListedInSettings(tempDir, mainWindow):
+    _wd, linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color: repository/green")
+    menu = mainWindow.generateTabContextMenu(1)
+    triggerMenuAction(menu, "tab color: this worktree/no color")
+
+    dlg = GFApplication.instance().openPrefsDialog("tabColorOverrides")
+    overridesList: QListWidget = dlg.findChild(QListWidget, "tabColorOverridesList")
+    bindingsList: QListWidget = dlg.findChild(QListWidget, "tabColorBindingsList")
+    assert bindingsList.count() == 1
+    assert overridesList.count() == 1
+    item = overridesList.item(0)
+    assert item.data(Qt.ItemDataRole.UserRole) == os.path.realpath(linked)
+    assert item.icon().isNull()  # "none" override: no dot icon
+    dlg.reject()
+
+
+def testRemoveOverrideViaSettingsRevertsToInherited(tempDir, mainWindow):
+    from gitfourchette import settings
+    _wd, linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color: repository/green")
+    menu = mainWindow.generateTabContextMenu(1)
+    triggerMenuAction(menu, "tab color: this worktree/red")
+    assert _tabIconKey(mainWindow, 1) == _dotKey("red")
+
+    dlg = GFApplication.instance().openPrefsDialog("tabColorOverrides")
+    overridesList: QListWidget = dlg.findChild(QListWidget, "tabColorOverridesList")
+    removeButton: QPushButton = dlg.findChild(QPushButton, "tabColorOverridesRemove")
+    assert not overridesList.item(0).icon().isNull()  # red dot shown
+    overridesList.setCurrentRow(0)
+    removeButton.click()
+    assert overridesList.count() == 0
+
+    # Working copy: nothing applied until OK
+    assert settings.prefs.tabColorOverrides == {os.path.realpath(linked): "red"}
+    dlg.accept()
+    assert settings.prefs.tabColorOverrides == {}
+    assert _tabIconKey(mainWindow, 1) == _dotKey("green")  # back to inherited

@@ -1195,7 +1195,7 @@ class MainWindow(QMainWindow):
                 rw.taskRunner.pendingEpilog.jumpTo = locator
                 rw.refreshRepo()
 
-        if "tabColorBindings" in changedKeys:
+        if changedKeys & {"tabColorBindings", "tabColorOverrides"}:
             self.refreshTabColors()
 
     # -------------------------------------------------------------------------
