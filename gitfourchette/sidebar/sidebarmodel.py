@@ -29,6 +29,14 @@ SYMBOL_AHEAD = "\u2191"
 SYMBOL_BEHIND = "\u2193"
 SYMBOL_UPDOWN = "\u21c5"
 
+STARRED_FOLDER_PREFIX = "starred:"
+"""
+Synthetic (non-ref) data prefix for RefFolder nodes built by
+populateStarredRefTree (fork). Keeps their getCollapseHash() distinct from a
+same-named folder in Local Branches or a remote's own tree, since a folder's
+collapse hash is f"{kind.name}.{data}" -- see SidebarNode.getCollapseHash.
+"""
+
 
 class SidebarItem(enum.IntEnum):
     Root = -1
@@ -202,13 +210,19 @@ class SidebarNode:
     def walk(self):
         # Unit test helper. Also used by Sidebar.restoreSelectionBackup, which
         # is why we don't descend into the Starred section (fork): its
-        # children are ALIAS nodes that deliberately share kind/data with a
-        # canonical node found elsewhere in the tree, and canonical nodes
+        # subtree -- leaf ALIAS nodes, and (since populateStarredRefTree)
+        # RefFolder nodes grouping them -- deliberately shares kind/data with
+        # canonical nodes found elsewhere in the tree, and canonical nodes
         # must stay authoritative for kind/data lookups, same as they already
         # are for nodesByRef (see SidebarModel.rebuild). Not doing this would
         # make restoreSelectionBackup prefer a starred alias over the
         # canonical node it's aliasing, since the Starred section is early in
         # SidebarLayout.RootItems.
+        #
+        # This works at any depth because the check below only ever fires
+        # once, when `node` IS the StarredHeader itself (there's only one):
+        # we simply never enqueue ITS children, so nothing under it -- no
+        # matter how deeply folders nest -- ever reaches the frontier.
         frontier = self.children[:]
         while frontier:
             node = frontier.pop(0)
@@ -383,6 +397,7 @@ class SidebarModel(QAbstractItemModel):
         localBranches = []
         remoteBranchesDict: dict[str, list[str]] = {}
         tags = []
+        starredEntries: list[tuple[SidebarItem, str]] = []
 
         # Prune starred refs that no longer exist (e.g. branch deleted) BEFORE
         # deciding whether the Starred header belongs in the root item list.
@@ -476,6 +491,8 @@ class SidebarModel(QAbstractItemModel):
             if prefix == RefPrefix.HEADS:
                 localBranches.append(shorthand)
                 # We're not caching upstreams because it's very expensive to do
+                if name in starredRefs:
+                    starredEntries.append((SidebarItem.LocalBranch, name))
 
             elif prefix == RefPrefix.REMOTES:
                 remote, branchName = split_remote_branch_shorthand(shorthand)
@@ -483,6 +500,8 @@ class SidebarModel(QAbstractItemModel):
                     remoteBranchesDict[remote].append(branchName)
                 except KeyError:
                     warnings.warn(f"SidebarModel: missing remote: {remote}")
+                if name in starredRefs:
+                    starredEntries.append((SidebarItem.RemoteBranch, name))
 
             elif prefix == RefPrefix.TAGS:
                 tags.append(shorthand)
@@ -514,13 +533,13 @@ class SidebarModel(QAbstractItemModel):
         # keeps winning findNodeByRef/indexForRef (jump, highlight, tests).
         # (staleStars was already pruned from starredRefs up above, before we
         # decided whether to include the Starred header at all.)
+        # starredEntries was collected above in the same iteration order as
+        # localBranches/remoteBranchesDict (i.e. descending commit time), so
+        # populateStarredRefTree can apply the same sort idiom as the main
+        # sections (see its docstring).
         if starredRefs:
             starredRoot = rootNode.findChild(SidebarItem.StarredHeader)
-            for refName in sorted(starredRefs):
-                canonical = self.nodesByRef[refName]
-                alias = SidebarNode(canonical.kind, refName)
-                alias.displayName = RefPrefix.split(refName)[1]
-                starredRoot.appendChild(alias)
+            self.populateStarredRefTree(starredEntries, starredRoot)
 
         # -----------------------------
         # Stashes
@@ -623,6 +642,88 @@ class SidebarModel(QAbstractItemModel):
                 folderNode.displayName = folderNode.data.removeprefix(refNamePrefix)
                 containerNode.appendChild(folderNode)
 
+    def populateStarredRefTree(self, entries: list[tuple[SidebarItem, str]], starredRoot: SidebarNode):
+        """
+        Build a RefFolder hierarchy under the Starred section (fork) from
+        `entries` -- (kind, refName) pairs for the currently starred refs --
+        mirroring populateRefNodeTree's folder-grouping algorithm (a slashed
+        shorthand nests under a folder named after its parent path; an
+        unslashed shorthand stays a flat child), with two differences that
+        matter for Starred specifically:
+
+        - Leaves are ALIAS nodes: same kind/data as the canonical node found
+          elsewhere in the tree, but deliberately NOT registered in
+          self.nodesByRef. The canonical node must stay authoritative for
+          findNodeByRef/indexForRef/restoreSelectionBackup -- see the
+          discussion in SidebarNode.walk().
+        - Folder nodes get a data value prefixed with STARRED_FOLDER_PREFIX
+          instead of a real ref prefix, so their collapse hash
+          (SidebarNode.getCollapseHash, which hashes kind+data) never
+          collides with a same-named folder in Local Branches or a remote's
+          own tree. This doesn't affect the folder's displayed name, which
+          is still just the tail of its path (folderNode.displayName).
+
+        `entries` must mix SidebarItem.LocalBranch and SidebarItem.RemoteBranch
+        kinds, and its refNames carry their own full ref prefix already, so
+        unlike populateRefNodeTree this method takes no single `kind` or
+        `refNamePrefix` -- both can vary per entry (a starred remote branch's
+        shorthand already includes its remote name, e.g. "origin/master", so
+        it naturally nests under an "origin" folder, mirroring how the
+        Remotes section groups branches under their remote).
+
+        `entries` is expected in the same order SidebarModel.rebuild already
+        walks repoModel.refs for the main sections (descending commit time),
+        so the sort branch below can reuse the exact idiom populateRefNodeTree
+        uses for the global default sort mode.
+        """
+        sortMode = settings.prefs.refSort
+
+        entryIter: Iterable[tuple[SidebarItem, str]]
+        if sortMode == RefSort.TimeAsc:
+            entryIter = reversed(entries)
+        elif sortMode == RefSort.AlphaAsc:
+            entryIter = sorted(entries, key=lambda e: naturalSort(RefPrefix.split(e[1])[1]))
+        elif sortMode == RefSort.AlphaDesc:
+            entryIter = sorted(entries, key=lambda e: naturalSort(RefPrefix.split(e[1])[1]), reverse=True)
+        else:
+            entryIter = entries
+
+        pendingFolders: dict[str, SidebarNode] = {}
+
+        for kind, refName in entryIter:
+            shorthand = RefPrefix.split(refName)[1]
+
+            if "/" not in shorthand:
+                folderNode = starredRoot
+            else:
+                folderName = shorthand.rsplit("/", 1)[0]
+                try:
+                    folderNode = pendingFolders[folderName]
+                except KeyError:
+                    folderNode = SidebarNode(SidebarItem.RefFolder, STARRED_FOLDER_PREFIX + folderName)
+                    pendingFolders[folderName] = folderNode
+
+            alias = SidebarNode(kind, refName)
+            folderNode.appendChild(alias)
+            # Deliberately not added to self.nodesByRef -- see docstring above.
+
+        for folderName, folderNode in pendingFolders.items():
+            parts = folderName.split("/")
+            parts.pop()
+            while parts:
+                parentFolder = "/".join(parts)
+                try:
+                    parentNode = pendingFolders[parentFolder]
+                except KeyError:
+                    parts.pop()
+                else:
+                    parentNode.appendChild(folderNode)
+                    folderNode.displayName = folderName.removeprefix(parentFolder + "/")
+                    break
+            else:
+                folderNode.displayName = folderName
+                starredRoot.appendChild(folderNode)
+
     def createIndexFromNode(self, node: SidebarNode) -> QModelIndex:
         index = self.createIndex(node.row, 0, node)
         return index
@@ -700,8 +801,10 @@ class SidebarModel(QAbstractItemModel):
             refName = node.data
             branchName = refName.removeprefix(RefPrefix.HEADS)
             if displayRole:
-                if node.parent.kind == SidebarItem.StarredHeader:
-                    return node.displayName
+                # Starred aliases (fork) show the tail here too: an
+                # enclosing RefFolder (built by populateStarredRefTree) or a
+                # flat position directly under StarredHeader already
+                # disambiguates them, just like in Local Branches.
                 if not BRANCH_FOLDERS:
                     return branchName
                 return branchName.rsplit("/", 1)[-1]
@@ -788,8 +891,10 @@ class SidebarModel(QAbstractItemModel):
             shorthand = refName.removeprefix(RefPrefix.REMOTES)
             remoteName, branchName = split_remote_branch_shorthand(shorthand)
             if displayRole:
-                if node.parent.kind == SidebarItem.StarredHeader:
-                    return node.displayName
+                # Starred aliases (fork): see the comment in the LocalBranch
+                # case above -- the enclosing folder (named after the remote,
+                # since a remote branch's shorthand already includes it)
+                # disambiguates the tail shown here.
                 if not BRANCH_FOLDERS:
                     return branchName
                 return branchName.rsplit("/", 1)[-1]
@@ -818,14 +923,21 @@ class SidebarModel(QAbstractItemModel):
             if displayRole:
                 return node.displayName
             elif toolTipRole:
-                prefix, name = RefPrefix.split(refName)
                 text = f"<p style='white-space: pre'>{stockIconImgTag('git-folder')} "
-                if prefix == RefPrefix.REMOTES:
-                    text += _("{0} (remote branch folder)", btag(name))
-                elif prefix == RefPrefix.TAGS:
-                    text += _("{0} (tag folder)", btag(name))
+                if refName.startswith(STARRED_FOLDER_PREFIX):
+                    # Starred folder (fork): data is a synthetic "starred:"
+                    # key, not a real ref prefix (see STARRED_FOLDER_PREFIX),
+                    # and may group a mix of local/remote branches, so it
+                    # doesn't get a "(local/remote branch folder)" caption.
+                    text += _("{0} (starred folder)", btag(node.displayName))
                 else:
-                    text += _("{0} (local branch folder)", btag(name))
+                    prefix, name = RefPrefix.split(refName)
+                    if prefix == RefPrefix.REMOTES:
+                        text += _("{0} (remote branch folder)", btag(name))
+                    elif prefix == RefPrefix.TAGS:
+                        text += _("{0} (tag folder)", btag(name))
+                    else:
+                        text += _("{0} (local branch folder)", btag(name))
                 text += self.visibilityToolTip(node)
                 self.cacheToolTip(index, text)
                 return text

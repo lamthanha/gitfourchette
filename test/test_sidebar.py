@@ -832,20 +832,29 @@ def testStarBranch(tempDir, mainWindow):
     triggerMenuAction(rw.sidebar.makeNodeMenu(folderNode), r"^star branch")
 
     starRoot = rw.sidebar.findNodeByKind(SidebarItem.StarredHeader)
-    assert {child.data for child in starRoot.children} == {"refs/heads/master", "refs/heads/folder/branchname"}
+    # "master" isn't slashed, so it stays a flat child of Starred, like a
+    # top-level branch in Local Branches. "folder/branchname" IS slashed, so
+    # it nests under a "folder" RefFolder, mirroring Local Branches' own
+    # folder tree -- it is NOT a direct child of Starred anymore.
+    assert len(starRoot.children) == 2
     assert starRoot.children[0].kind == SidebarItem.LocalBranch
+    assert starRoot.children[0].data == "refs/heads/master"
+    starredFolderNode = starRoot.children[1]
+    assert starredFolderNode.kind == SidebarItem.RefFolder
+    assert starredFolderNode.displayName == "folder"
+    assert [c.data for c in starredFolderNode.children] == ["refs/heads/folder/branchname"]
 
     # Canonical node lookup unaffected: findNodeByRef resolves OUTSIDE Starred
     canonical = rw.sidebar.findNodeByRef("refs/heads/master")
     assert canonical.parent.kind != SidebarItem.StarredHeader
 
-    # A starred branch nested in a folder must show its full path (not just
-    # the last path segment) so it isn't confused with another branch of the
-    # same leaf name elsewhere in the tree.
-    folderAlias = next(c for c in starRoot.children if c.data == "refs/heads/folder/branchname")
-    assert folderAlias.displayName == "folder/branchname"
+    # A starred branch nested in a folder shows only its tail ("branchname"),
+    # like a branch in Local Branches -- the enclosing "folder" RefFolder
+    # already disambiguates it, so the full path is no longer needed.
+    folderAlias = starredFolderNode.children[0]
+    assert folderAlias.data == "refs/heads/folder/branchname"
     folderAliasIndex = rw.sidebar.nodeToFilterIndex(folderAlias)
-    assert folderAliasIndex.data(Qt.ItemDataRole.DisplayRole) == "folder/branchname"
+    assert folderAliasIndex.data(Qt.ItemDataRole.DisplayRole) == "branchname"
 
     # The alias carries a fully functional branch menu; unstar via the alias
     masterAlias = next(c for c in starRoot.children if c.data == "refs/heads/master")
@@ -874,15 +883,24 @@ def testStarRemoteBranch(tempDir, mainWindow):
     triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^star branch")
 
     starRoot = rw.sidebar.findNodeByKind(SidebarItem.StarredHeader)
-    alias = starRoot.children[0]
+    # A remote branch's shorthand always includes its remote name
+    # ("origin/master"), so it's always slashed and nests under a folder
+    # named after the remote -- mirroring how the Remotes section groups
+    # branches under their remote.
+    assert len(starRoot.children) == 1
+    folderNode = starRoot.children[0]
+    assert folderNode.kind == SidebarItem.RefFolder
+    assert folderNode.displayName == "origin"
+
+    alias = folderNode.children[0]
     assert alias.kind == SidebarItem.RemoteBranch
     assert alias.data == "refs/remotes/origin/master"
-    assert alias.displayName == "origin/master"
 
-    # displayRole through the model must show the full "remote/branch" shorthand,
-    # not just the last path segment ("master" alone would be ambiguous).
+    # displayRole through the model must show just the tail ("master"), like
+    # a remote branch nested under its Remote node in the Remotes section --
+    # the enclosing "origin" folder already disambiguates it.
     aliasIndex = rw.sidebar.nodeToFilterIndex(alias)
-    assert aliasIndex.data(Qt.ItemDataRole.DisplayRole) == "origin/master"
+    assert aliasIndex.data(Qt.ItemDataRole.DisplayRole) == "master"
 
 
 def testStarredBranchPersistsAcrossReopen(tempDir, mainWindow):
@@ -912,6 +930,149 @@ def testStarredBranchPrunedWhenBranchDeleted(tempDir, mainWindow):
 
     assert not rw.sidebar.findNodesByKind(SidebarItem.StarredHeader)
     assert "refs/heads/doomed" not in rw.sidebar.sidebarModel.repoModel.prefs.starredRefs
+
+
+def testStarredFolderTracksMembership(tempDir, mainWindow):
+    """
+    Starring several branches under the same parent folder ("feat/...") must
+    group them under ONE RefFolder in Starred (not one flat row apiece), and
+    unstarring must shrink/remove that folder as membership drops -- exactly
+    like Local Branches' own folder tree, rebuilt fresh from starredRefs on
+    every model rebuild.
+    """
+    wd = unpackRepo(tempDir)
+    runShellScript("git branch feat/a master && git branch feat/b master", wd)
+    rw = mainWindow.openRepo(wd)
+    sb = rw.sidebar
+
+    def getStarredFolder():
+        starRoot = sb.findNodeByKind(SidebarItem.StarredHeader)
+        return next((c for c in starRoot.children if c.kind == SidebarItem.RefFolder), None)
+
+    # Star one branch in "feat/" -- a folder appears with one child.
+    triggerMenuAction(sb.makeNodeMenu(sb.findNodeByRef("refs/heads/feat/a")), r"^star branch")
+    folderNode = getStarredFolder()
+    assert folderNode is not None
+    assert folderNode.displayName == "feat"
+    assert [c.data for c in folderNode.children] == ["refs/heads/feat/a"]
+
+    # Star a second branch in the same folder -- one folder, two children.
+    triggerMenuAction(sb.makeNodeMenu(sb.findNodeByRef("refs/heads/feat/b")), r"^star branch")
+    starRoot = sb.findNodeByKind(SidebarItem.StarredHeader)
+    assert len([c for c in starRoot.children if c.kind == SidebarItem.RefFolder]) == 1
+    folderNode = getStarredFolder()
+    assert {c.data for c in folderNode.children} == {"refs/heads/feat/a", "refs/heads/feat/b"}
+
+    # Unstar one -- folder survives with the other child.
+    aliasA = next(c for c in getStarredFolder().children if c.data == "refs/heads/feat/a")
+    triggerMenuAction(sb.makeNodeMenu(aliasA), r"^unstar branch")
+    folderNode = getStarredFolder()
+    assert folderNode is not None
+    assert [c.data for c in folderNode.children] == ["refs/heads/feat/b"]
+
+    # Unstar the last child -- the folder (and the whole Starred section,
+    # since nothing else is starred) disappears.
+    aliasB = next(c for c in getStarredFolder().children if c.data == "refs/heads/feat/b")
+    triggerMenuAction(sb.makeNodeMenu(aliasB), r"^unstar branch")
+    assert not sb.findNodesByKind(SidebarItem.StarredHeader)
+
+
+def testStarredTreeSortMatchesGlobalRefSort(tempDir, mainWindow):
+    """
+    Sorting within the Starred tree must follow the same global refSort
+    idiom as the main sections: populateStarredRefTree reuses the exact
+    RefSort branch/naturalSort logic populateRefNodeTree applies when a
+    section defers to the global default, so a Starred folder isn't stuck
+    with some independent ordering.
+    """
+    wd = unpackRepo(tempDir)
+    runShellScript("git branch feat/zulu master && git branch feat/alpha master", wd)
+    rw = mainWindow.openRepo(wd)
+    sb = rw.sidebar
+
+    triggerMenuAction(sb.makeNodeMenu(sb.findNodeByRef("refs/heads/feat/zulu")), r"^star branch")
+    triggerMenuAction(sb.makeNodeMenu(sb.findNodeByRef("refs/heads/feat/alpha")), r"^star branch")
+
+    def getStarredFeatFolderChildren():
+        starRoot = sb.findNodeByKind(SidebarItem.StarredHeader)
+        folderNode = next(c for c in starRoot.children if c.kind == SidebarItem.RefFolder)
+        return [c.data for c in folderNode.children]
+
+    # Default global sort is TimeDesc. Both branches share master's commit,
+    # so compare against Local Branches' own order for the same two refs
+    # instead of asserting one fixed order (avoids depending on tie-breaking).
+    localOrder = [n.data for n in sb.findNodesByKind(SidebarItem.LocalBranch)
+                  if n.data in ("refs/heads/feat/zulu", "refs/heads/feat/alpha")]
+    assert getStarredFeatFolderChildren() == localOrder
+
+    # Switch the GLOBAL ref sort to alphabetical and force a rebuild. Starred
+    # has no dedicated per-section sort override, so it must pick up the
+    # global preference exactly like a main section left at its
+    # UseGlobalPref default would.
+    dlg = GFApplication.instance().openPrefsDialog("refSort")
+    comboBox: QComboBox = dlg.findChild(QWidget, "prefctl_refSort")
+    qcbSetIndex(comboBox, "name.+a-z")
+    dlg.accept()
+    acceptQMessageBox(mainWindow, "take effect.+until you reload")
+
+    sb.refresh(rw.repoModel)
+    assert getStarredFeatFolderChildren() == ["refs/heads/feat/alpha", "refs/heads/feat/zulu"]
+
+
+def testStarredUnslashedBranchStaysFlat(tempDir, mainWindow):
+    """ Starring a branch with no "/" in its name never creates a folder. """
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    sb = rw.sidebar
+
+    triggerMenuAction(sb.makeNodeMenu(sb.findNodeByRef("refs/heads/master")), r"^star branch")
+
+    starRoot = sb.findNodeByKind(SidebarItem.StarredHeader)
+    assert len(starRoot.children) == 1
+    assert starRoot.children[0].kind == SidebarItem.LocalBranch
+    assert starRoot.children[0].data == "refs/heads/master"
+
+
+def testStarredFolderCollapseIndependentOfLocalBranches(tempDir, mainWindow):
+    """
+    A Starred folder's collapse state must not be tied to a same-named
+    folder in Local Branches: getCollapseHash() is f"{kind.name}.{data}", and
+    populateStarredRefTree gives Starred folders a "starred:"-prefixed data
+    precisely so the two hashes never collide.
+    """
+    wd = unpackRepo(tempDir)
+    runShellScript("git branch folder/branchname master", wd)
+    rw = mainWindow.openRepo(wd)
+    sb = rw.sidebar
+
+    def getLocalFolder():
+        return sb.findNode(lambda n: n.kind == SidebarItem.RefFolder and n.data == "refs/heads/folder")
+
+    def getStarredFolder():
+        starRoot = sb.findNodeByKind(SidebarItem.StarredHeader)
+        return next(c for c in starRoot.children if c.kind == SidebarItem.RefFolder)
+
+    triggerMenuAction(sb.makeNodeMenu(sb.findNodeByRef("refs/heads/folder/branchname")), r"^star branch")
+
+    localFolderNode = getLocalFolder()
+    starredFolderNode = getStarredFolder()
+    assert starredFolderNode.data != localFolderNode.data
+    assert starredFolderNode.getCollapseHash() != localFolderNode.getCollapseHash()
+    assert _sbExpanded(rw, localFolderNode)
+    assert _sbExpanded(rw, starredFolderNode)
+
+    # Collapsing the Starred "folder" must not collapse Local Branches' "folder".
+    sb.collapse(sb.nodeToFilterIndex(starredFolderNode))
+    assert not _sbExpanded(rw, getStarredFolder())
+    assert _sbExpanded(rw, getLocalFolder())
+
+    # And the reverse: collapsing Local Branches' "folder" must not collapse
+    # (or otherwise affect) Starred's, which we just re-expand to prove it.
+    sb.expand(sb.nodeToFilterIndex(getStarredFolder()))
+    assert _sbExpanded(rw, getStarredFolder())
+    sb.collapse(sb.nodeToFilterIndex(getLocalFolder()))
+    assert not _sbExpanded(rw, getLocalFolder())
+    assert _sbExpanded(rw, getStarredFolder())
 
 
 def testNoExpandZoneOnChildlessNodes(tempDir, mainWindow):
