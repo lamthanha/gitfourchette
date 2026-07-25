@@ -363,14 +363,22 @@ def testPruneWorktrees(tempDir, mainWindow):
     assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 1
 
 
-def testWorktreesSectionAboveLocalBranches(tempDir, mainWindow):
+def testWorktreesSectionAboveStarredAndLocalBranches(tempDir, mainWindow):
     from gitfourchette.sidebar.sidebarmodel import SidebarItem
     wd = unpackRepo(tempDir)
     rw = mainWindow.openRepo(wd)
     root = rw.sidebar.findNodeByKind(SidebarItem.WorktreesHeader).parent
     kinds = [n.kind for n in root.children]
-    # "Directly above": only the Spacer between them separates the two headers.
+    # No starred refs: Starred section is dropped, so only the Spacer separates the two headers.
     assert kinds.index(SidebarItem.LocalBranchesHeader) - kinds.index(SidebarItem.WorktreesHeader) == 2
+
+    # With a starred ref, Starred appears BELOW Worktrees and above Local Branches.
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^star branch")
+    root = rw.sidebar.findNodeByKind(SidebarItem.WorktreesHeader).parent
+    kinds = [n.kind for n in root.children]
+    assert kinds.index(SidebarItem.WorktreesHeader) < kinds.index(SidebarItem.StarredHeader)
+    assert kinds.index(SidebarItem.StarredHeader) < kinds.index(SidebarItem.LocalBranchesHeader)
 
 
 def testBranchMenuOpensExistingWorktreeInsteadOfNew(tempDir, mainWindow):
