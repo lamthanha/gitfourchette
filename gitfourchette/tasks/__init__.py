@@ -88,6 +88,7 @@ from gitfourchette.tasks.nettasks import (
     UpdateSubmodule,
     UpdateSubmodulesRecursive,
 )
+from gitfourchette.tasks.commitpushtasks import CommitAndPush
 from gitfourchette.tasks.remotetasks import NewRemote, EditRemote, DeleteRemote
 
 from gitfourchette.tasks.indextasks import (

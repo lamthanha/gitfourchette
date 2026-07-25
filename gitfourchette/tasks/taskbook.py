@@ -42,6 +42,7 @@ class TaskBook:
             tasks.ApplyStash: _("Apply stash"),
             tasks.CheckoutCommit: _("Check out commit"),
             tasks.CherrypickCommit: _("Cherry-pick"),
+            tasks.CommitAndPush: _("Commit and push"),
             tasks.ContinueRebase: _("Continue rebase"),
             tasks.DeleteBranch: _("Delete local branch"),
             tasks.DeleteBranchFolder: _("Delete local branch folder"),
