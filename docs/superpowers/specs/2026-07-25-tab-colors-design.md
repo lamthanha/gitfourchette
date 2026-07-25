@@ -86,3 +86,33 @@ Per the fork's new-code-in-new-modules rule. Contents:
 - Dots outside the tab bar (window menu, recent-repos list, taskbar).
 - Per-branch or per-session colors.
 - Migrating binding keys when a repo directory is moved.
+
+## Amendment (2026-07-25 evening): menu split + global override storage
+
+User smoke-test feedback (real gitfourchette + gitfourchette-multiselect worktree pair): the single
+"Tab Color" submenu mixes the repo-binding scope and the worktree-override scope in one checkable
+tree — the top-level swatches read as "this tab's color" but actually show the repo binding, and the
+effective color's provenance is invisible. Also, worktree overrides (stored per-worktree in gitdir
+JSON) cannot be listed in Settings. Approved redesign:
+
+1. **Global override storage.** `RepoPrefs.tabColorOverride` is replaced by global
+   `Prefs.tabColorOverrides: dict[str, str]` keyed by *worktree realpath* (values: color name or
+   `"none"`). Consequences: Settings can list/remove every override; unloaded (RepoStub) tabs honor
+   overrides; one storage mechanism for all color state. The RepoPrefs field is kept as a legacy
+   shim: on first resolution of a loaded repo, a non-empty legacy value is migrated into the global
+   dict (setdefault semantics) and cleared from the repo's JSON.
+2. **Menu split.** When the repo has linked worktrees OR an override exists for this worktree
+   (clearable-orphan rule), the tab context menu shows TWO submenus: "Tab Color: Repository"
+   (swatches = binding, No Color, Manage Tab Colors…) and "Tab Color: This Worktree" (swatches =
+   override, No Color = `"none"`, "Inherited (X)" = `""`). Single-worktree repos keep one flat
+   "Tab Color" submenu (binding + Manage) — no worktree scope shown at all.
+3. **"Inherited (X)" label** replaces "Auto": shows the inherited color's name and dot icon
+   (e.g. "Inherited (Green)"), or "Inherited (No Color)" when the repo has no binding.
+4. **Provenance status row**: a disabled first row in each color submenu showing the effective
+   color dot + provenance — "Red — set for this worktree" / "Green — repository color" /
+   "No color — set for this worktree". Omitted when neither binding nor override exists.
+   The repository-scope menu stays enabled when overridden (it still governs other worktrees).
+5. **Settings**: two list controls in the Tabs category — "Repository tab colors"
+   (`tabColorBindings`) and "Worktree tab colors" (`tabColorOverrides`), same read/remove UX;
+   override rows with value `"none"` show no dot icon. Removing an override row reverts that
+   worktree to inherited.
