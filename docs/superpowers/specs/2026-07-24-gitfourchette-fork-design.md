@@ -134,3 +134,16 @@ All new tasks ride the existing machinery: `AbortTask` for controlled bails, git
 ## Success criteria
 
 Entirely within the GUI, the user can: rebase the current branch onto an arbitrary commit including conflict resolution; reorder/drop/squash/fixup/reword commits via interactive rebase; create, open, remove, and prune worktrees; and continue or abort a rebase that was started in a terminal.
+
+## Phase 3 Amendment (2026-07-25, user smoke feedback)
+
+1. **Worktrees section moves to the top of the sidebar** — directly above Local Branches
+   (after the Workdir section), instead of below Submodules.
+2. **Worktree-aware branch menus:** when a branch is already checked out in some worktree,
+   its context menu shows **"Open in <worktree-name> Worktree"** (opens/focuses that
+   worktree's tab) INSTEAD of "Checkout in New Worktree…" (which git would refuse anyway).
+   Applies to local branches, and to remote-tracking branches whose same-shorthand local
+   branch is checked out somewhere (remote menus previously had no worktree entry at all;
+   a checkout-in-new-worktree entry for remote branches remains out of scope).
+3. **Fix:** the New Worktree dialog's "&Path:" label rendered a literal ampersand — QLabels
+   only consume mnemonics when they have a buddy; set the path field as its buddy.
