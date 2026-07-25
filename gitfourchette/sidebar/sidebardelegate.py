@@ -172,9 +172,12 @@ class SidebarDelegate(QStyledItemDelegate):
             textRect.adjust(0, 0, -EYE_WIDTH, 0)
         if makeRoomForStar:
             textRect.adjust(0, 0, -STAR_WIDTH, 0)
-            if makeRoomForEye:
-                # Keep the painted star clear of the eye's click band
-                textRect.adjust(0, 0, -PADDING, 0)
+
+        # Anchor the star/eye button bands to the row's right edge NOW, before
+        # the indicator blocks below clip textRect leftward. The bands must
+        # stay pinned to the right regardless of any indicator; only the text
+        # (and the indicator itself) yield space to each other.
+        bandAnchor = textRect.right()
 
         font: QFont = index.data(Qt.ItemDataRole.FontRole) or option.font
         baseFontSize = font.pointSizeF()
@@ -189,6 +192,9 @@ class SidebarDelegate(QStyledItemDelegate):
         elif missingUpstream:
             r = QRect(option.rect)
             r.setLeft(textRect.right() - EYE_WIDTH)
+            # Cap the width so the centered icon stays left of the star band
+            # (r otherwise spans to the contents edge, i.e. under the band).
+            r.setWidth(EYE_WIDTH)
             unpluggedIcon = stockIcon("git-upstream-missing")
             unpluggedIcon.paint(painter, r, mode=iconMode)
             # Clip rect
@@ -237,9 +243,11 @@ class SidebarDelegate(QStyledItemDelegate):
             text = painter.fontMetrics().elidedText(fullText, Qt.TextElideMode.ElideMiddle, textRect.width())
             painter.drawText(textRect, option.displayAlignment, text)
 
-        # Draw star/eye buttons: bands fill right-to-left from the text edge,
-        # star left of eye; each collapses when unused.
-        bandLeft = textRect.right()
+        # Draw star/eye buttons: flush bands filling right-to-left from the
+        # row's right edge (bandAnchor, captured before indicator clipping),
+        # star left of eye; each collapses when unused. This flush layout is
+        # what aligns the painted icons with the raw-frame click zones.
+        bandLeft = bandAnchor
         if makeRoomForStar:
             r = QRect(option.rect)
             r.setLeft(bandLeft)
@@ -247,8 +255,6 @@ class SidebarDelegate(QStyledItemDelegate):
             starIcon = stockIcon("star-filled" if isStarred else "star-outline")
             starIcon.paint(painter, r, mode=iconMode)
             bandLeft += STAR_WIDTH
-            if makeRoomForEye:
-                bandLeft += PADDING
         if makeRoomForEye:
             r = QRect(option.rect)
             r.setLeft(bandLeft)

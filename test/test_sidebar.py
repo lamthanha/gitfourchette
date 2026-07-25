@@ -956,3 +956,116 @@ def testStarButtonClickTogglesStar(tempDir, mainWindow):
     QTest.mouseClick(rw.sidebar.viewport(), Qt.MouseButton.LeftButton, pos=aliasStarPos)
     assert "refs/heads/no-parent" not in rw.sidebar.sidebarModel.repoModel.prefs.starredRefs
     assert not rw.sidebar.findNodesByKind(SidebarItem.StarredHeader)
+
+
+def _recordPaintedIcons(rw, node, mouseOver, monkeypatch):
+    """
+    Drive the real SidebarDelegate.paint() for one row and return
+    (rawRect, {iconName: paintedRect}) by recording the rect handed to each
+    stockIcon's paint(). option.rect is the RAW visualRect, so the delegate
+    applies its own PADDING inset -- meaning the recorded rects live in the
+    same coordinate space as visualRect and are directly comparable to the
+    raw-frame click zones from getClickZone.
+    """
+    from gitfourchette.sidebar import sidebardelegate as sd
+
+    sb = rw.sidebar
+    delegate = sb.itemDelegate()
+    index = sb.nodeToFilterIndex(node)
+
+    painted = {}
+
+    class _RecordingIcon:
+        def __init__(self, name):
+            self.name = name
+
+        def paint(self, painter, rect, *args, **kwargs):
+            painted[self.name] = QRect(rect)
+
+    monkeypatch.setattr(sd, "stockIcon", lambda name, *a, **k: _RecordingIcon(name))
+
+    option = QStyleOptionViewItem()
+    option.initFrom(sb)
+    option.widget = sb
+    rawRect = QRect(sb.visualRect(index))
+    option.rect = QRect(rawRect)
+    delegate.initStyleOption(option, index)
+    option.decorationSize = QSize(16, 16)
+    option.state |= QStyle.StateFlag.State_Enabled | QStyle.StateFlag.State_Active
+    if mouseOver:
+        option.state |= QStyle.StateFlag.State_MouseOver
+    else:
+        option.state &= ~QStyle.StateFlag.State_MouseOver
+
+    pixmap = QPixmap(rawRect.right() + 64, rawRect.bottom() + 64)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    try:
+        delegate.paint(painter, option, index)
+    finally:
+        painter.end()
+
+    return rawRect, painted
+
+
+def testStarPaintDoesNotCollideWithIndicatorsOrHideZone(tempDir, mainWindow, monkeypatch):
+    """
+    Regression guard for the two whole-branch review findings that the
+    per-task reviews missed (they asserted click-zone arithmetic but never
+    painted rects):
+
+    (a) On a starred, non-hovered row that also shows the missing-upstream
+        indicator, the star band must rest at the row's right edge and must
+        NOT paint on top of the indicator (Finding 1).
+    (b) On a hovered starred row, the flush star/eye layout must keep the
+        painted star inside its raw-frame Star click zone (bar 1px-class left
+        slack) and out of the Hide zone (Finding 2).
+    """
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        # Give 'master' a configured-but-gone upstream so its row draws the
+        # git-upstream-missing indicator (same setup as testSidebarMissingUpstream).
+        repo.config["branch.master.merge"] = "refs/heads/missing-upstream"
+    rw = mainWindow.openRepo(wd)
+
+    # --- (a) starred + non-hovered + missing-upstream indicator ---
+    triggerMenuAction(rw.sidebar.makeNodeMenu(rw.sidebar.findNodeByRef("refs/heads/master")), r"^star branch")
+    masterNode = rw.sidebar.findNodeByRef("refs/heads/master")
+    rawRect, painted = _recordPaintedIcons(rw, masterNode, mouseOver=False, monkeypatch=monkeypatch)
+
+    assert "git-upstream-missing" in painted, "missing-upstream indicator should be drawn on a non-hovered row"
+    assert "star-filled" in painted, "starred row should draw the filled star"
+    starRect = painted["star-filled"]
+    indicatorRect = painted["git-upstream-missing"]
+
+    # The star must not paint on top of the indicator...
+    assert not starRect.intersects(indicatorRect), \
+        f"star {starRect} overlaps indicator {indicatorRect}"
+    # ...and it must sit flush against the row's right contents edge (rawRight - PADDING).
+    contentsRight = rawRect.right() - PADDING
+    assert starRect.right() >= contentsRight - 2, \
+        f"star right {starRect.right()} not at contents edge {contentsRight}"
+
+    # --- (b) hovered starred row: flush star/eye alignment ---
+    hoverNode = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    rawRectB, paintedB = _recordPaintedIcons(rw, hoverNode, mouseOver=True, monkeypatch=monkeypatch)
+
+    assert "star-outline" in paintedB or "star-filled" in paintedB, "hovered row should draw a star button"
+    starB = paintedB.get("star-filled") or paintedB["star-outline"]
+    eyeB = next((r for name, r in paintedB.items() if name.startswith("view-")), None)
+    assert eyeB is not None, "hovered hideable row should draw an eye button"
+
+    rawRight = rawRectB.right()
+    starZoneBoundary = rawRight - EYE_WIDTH - STAR_WIDTH - PADDING  # x > this => Star zone
+    hideZoneBoundary = rawRight - EYE_WIDTH - PADDING               # x > this => Hide zone
+
+    # No painted star pixel may fall in the Hide zone.
+    assert starB.right() <= hideZoneBoundary, \
+        f"star {starB} bleeds into Hide zone (> {hideZoneBoundary})"
+    # Every star pixel lies in the Star zone except at most the single leftmost
+    # column (the 1px-class Select slack the eye has always had too).
+    assert starB.left() >= starZoneBoundary, \
+        f"star {starB} left {starB.left()} spills past Star-zone start {starZoneBoundary} into Select"
+    # The eye sits to the right of the star, and its right region is in the Hide zone.
+    assert eyeB.left() >= starB.right(), f"eye {eyeB} overlaps star {starB}"
+    assert eyeB.right() > hideZoneBoundary, f"eye {eyeB} right not inside Hide zone"
