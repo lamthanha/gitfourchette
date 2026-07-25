@@ -354,6 +354,9 @@ class QTabWidget2(QWidget):
     def setTabTooltip(self, i: int, toolTip: str):
         self.tabs.setTabToolTip(i, toolTip)
 
+    def setTabIcon(self, i: int, icon: QIcon):
+        self.tabs.setTabIcon(i, icon)
+
     def currentWidget(self) -> QWidget:
         return self.stacked.currentWidget()
 

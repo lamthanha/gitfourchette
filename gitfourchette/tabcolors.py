@@ -5,6 +5,7 @@
 # -----------------------------------------------------------------------------
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from gitfourchette import colors
@@ -86,3 +87,92 @@ def tabDotIcon(colorName: str) -> QIcon:
     fill = TAB_PALETTE[colorName]
     outline = fill.darker(140)
     return stockIcon("tab-dot", f"red={fill.name()} black={outline.name()}")
+
+
+def _swatchCaptions() -> dict[str, str]:
+    return {
+        "red": _("&Red"),
+        "orange": _("&Orange"),
+        "yellow": _("&Yellow"),
+        "green": _("&Green"),
+        "teal": _("&Teal"),
+        "blue": _("&Blue"),
+        "purple": _("&Purple"),
+        "gray": _("Gr&ay"),
+    }
+
+
+def makeTabColorSubmenu(
+        parentMenu: QMenu,
+        workdir: str,
+        repoPrefs,
+        refresh: Callable[[], None],
+        openSettings: Callable[[], None],
+) -> QMenu:
+    """
+    Build the "Tab Color" submenu for a repo tab's context menu.
+    repoPrefs is the tab's RepoPrefs, or None for an unloaded tab (worktree
+    overrides live in the repo's prefs, so that submenu is disabled then).
+    """
+    bindingKey = repoBindingKey(workdir)
+    currentBinding = settings.prefs.tabColorBindings.get(bindingKey, "")
+    currentOverride = repoPrefs.tabColorOverride if repoPrefs is not None else ""
+
+    submenu = QMenu(_("Tab &Color"), parentMenu)
+    submenu.setObjectName("MWTabColorMenu")
+
+    def setBinding(name: str):
+        if name:
+            settings.prefs.tabColorBindings[bindingKey] = name
+        else:
+            settings.prefs.tabColorBindings.pop(bindingKey, None)
+        settings.prefs.setDirty()
+        settings.prefs.write()
+        refresh()
+
+    def setOverride(value: str):
+        repoPrefs.tabColorOverride = value
+        repoPrefs.setDirty()
+        refresh()
+
+    captions = _swatchCaptions()
+
+    for name in TAB_PALETTE:
+        swatch = submenu.addAction(tabDotIcon(name), captions[name])
+        swatch.setCheckable(True)
+        swatch.setChecked(currentBinding == name)
+        swatch.triggered.connect(lambda checked=False, n=name: setBinding(n))
+
+    noColor = submenu.addAction(_("&No Color"))
+    noColor.setCheckable(True)
+    noColor.setChecked(not currentBinding)
+    noColor.triggered.connect(lambda: setBinding(""))
+
+    submenu.addSeparator()
+
+    worktreeMenu = submenu.addMenu(_("Only This &Worktree"))
+    worktreeMenu.setObjectName("MWTabColorWorktreeMenu")
+    if repoPrefs is None:
+        # Disable at the action level: that's what the parent menu displays
+        # and what findMenuAction/isEnabled consult.
+        worktreeMenu.menuAction().setEnabled(False)
+    else:
+        for name in TAB_PALETTE:
+            swatch = worktreeMenu.addAction(tabDotIcon(name), captions[name])
+            swatch.setCheckable(True)
+            swatch.setChecked(currentOverride == name)
+            swatch.triggered.connect(lambda checked=False, n=name: setOverride(n))
+        wtNoColor = worktreeMenu.addAction(_("&No Color"))
+        wtNoColor.setCheckable(True)
+        wtNoColor.setChecked(currentOverride == OVERRIDE_NONE)
+        wtNoColor.triggered.connect(lambda: setOverride(OVERRIDE_NONE))
+        wtAuto = worktreeMenu.addAction(_("A&uto"))  # &A is taken by Gr&ay
+        wtAuto.setCheckable(True)
+        wtAuto.setChecked(currentOverride not in TAB_PALETTE and currentOverride != OVERRIDE_NONE)
+        wtAuto.triggered.connect(lambda: setOverride(""))
+
+    submenu.addSeparator()
+    manage = submenu.addAction(_("&Manage Tab Colors…"))
+    manage.triggered.connect(lambda: openSettings())
+
+    return submenu

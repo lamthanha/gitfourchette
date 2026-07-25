@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 from gitfourchette import settings
+from gitfourchette import tabcolors
 from gitfourchette import tasks
 from gitfourchette.application import GFApplication
 from gitfourchette.codeview.codeview import CodeView
@@ -482,6 +483,8 @@ class MainWindow(QMainWindow):
         super().setWindowTitle(title)
 
     def onTabCurrentWidgetChanged(self):
+        self.refreshTabColors()
+
         self.mainToolBar.updateNavButtons()  # Kill back/forward arrows
         self.statusBar2.clearMessage()
 
@@ -532,6 +535,17 @@ class MainWindow(QMainWindow):
             ActionDef(_("Unload Other Tabs"), lambda: self.unloadOtherTabs(i), enabled=self.tabs.count() > 1 and anyOtherLoadedTabs),
             ActionDef.SEPARATOR,
             *self.repolessActions(widget.workdir),
+            ActionDef.SEPARATOR,
+        )
+
+        repoPrefs = widget.repoModel.prefs if isinstance(widget, RepoWidget) else None
+        menu.addMenu(tabcolors.makeTabColorSubmenu(
+            menu, widget.workdir, repoPrefs,
+            refresh=self.refreshTabColors,
+            openSettings=lambda: GFApplication.instance().openPrefsDialog("tabColorBindings")))
+
+        ActionDef.addToQMenu(
+            menu,
             ActionDef.SEPARATOR,
             ActionDef(_("Configure Tabs…"), lambda: GFApplication.instance().openPrefsDialog("tabCloseButton")),
         )
@@ -905,6 +919,18 @@ class MainWindow(QMainWindow):
         rw = self.currentRepoWidget()
         rw.replaceWithStub()
 
+    def refreshTabColors(self):
+        for i in range(self.tabs.count()):
+            widget = self.tabs.widget(i)
+            if widget is None:
+                continue
+            if widget.property(QTabWidget2.UrgentPropertyName):
+                continue  # urgent icon owns the slot until the tab is activated
+            repoPrefs = widget.repoModel.prefs if isinstance(widget, RepoWidget) else None
+            colorName = tabcolors.resolveTabColorName(widget.workdir, repoPrefs)
+            icon = tabcolors.tabDotIcon(colorName) if colorName else QIcon()
+            self.tabs.setTabIcon(i, icon)
+
     def refreshAllTabTexts(self):
         widgets = list(self.tabs.widgets())
         baseTitles = [widget.getTitle() for widget in widgets]
@@ -930,6 +956,8 @@ class MainWindow(QMainWindow):
 
         for i, title in enumerate(newTitles):
             self.tabs.setTabText(i, escamp(title))
+
+        self.refreshTabColors()
 
     def openRepoNextTo(self, rw, path: str, locator: NavLocator = NavLocator.Empty):
         index = self.tabs.indexOf(rw)
@@ -1165,6 +1193,9 @@ class MainWindow(QMainWindow):
                 locator = locator.withExtraFlags(NavFlags.ForceDiff | NavFlags.ForceRecreateDocument)
                 rw.taskRunner.pendingEpilog.jumpTo = locator
                 rw.refreshRepo()
+
+        if "tabColorBindings" in changedKeys:
+            self.refreshTabColors()
 
     # -------------------------------------------------------------------------
     # Dispatch commands to detached windows

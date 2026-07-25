@@ -95,3 +95,154 @@ def testTabColorPrefFieldsDefaultsAndRoundTrip(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     rw = mainWindow.openRepo(wd)
     assert rw.repoModel.prefs.tabColorOverride == ""
+
+
+def _dotKey(colorName: str) -> int:
+    return tabcolors.tabDotIcon(colorName).cacheKey()
+
+
+def _tabIconKey(mainWindow, i: int):
+    icon = mainWindow.tabs.tabs.tabIcon(i)
+    return None if icon.isNull() else icon.cacheKey()
+
+
+def _openMainAndLinkedWorktree(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    runShellScript("git worktree add ../LinkedWT", wd)
+    linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
+    rwMain = mainWindow.openRepo(wd)
+    rwChild = mainWindow.openRepo(linked)
+    assert mainWindow.tabs.indexOf(rwMain) == 0
+    assert mainWindow.tabs.indexOf(rwChild) == 1
+    return wd, linked, rwMain, rwChild
+
+
+def testBindWholeRepoFromMainTab(tempDir, mainWindow):
+    from gitfourchette import settings
+    wd, linked, rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    assert _tabIconKey(mainWindow, 0) is None
+    assert _tabIconKey(mainWindow, 1) is None
+
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color/orange")
+
+    assert settings.prefs.tabColorBindings == {os.path.realpath(wd): "orange"}
+    assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
+    assert _tabIconKey(mainWindow, 1) == _dotKey("orange")
+
+    # Regenerated menu shows the current binding checked, on both tabs
+    for i in range(2):
+        menu = mainWindow.generateTabContextMenu(i)
+        assert findMenuAction(menu, "tab color/orange").isChecked()
+        assert not findMenuAction(menu, "tab color/no color").isChecked()
+
+    # No Color removes the binding and both dots
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color/no color")
+    assert settings.prefs.tabColorBindings == {}
+    assert _tabIconKey(mainWindow, 0) is None
+    assert _tabIconKey(mainWindow, 1) is None
+
+
+def testBindWholeRepoFromChildWorktreeTab(tempDir, mainWindow):
+    from gitfourchette import settings
+    wd, linked, rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+
+    menu = mainWindow.generateTabContextMenu(1)  # child worktree's tab
+    triggerMenuAction(menu, "tab color/teal")
+
+    # Keyed to the MAIN root even when set from the child's tab
+    assert settings.prefs.tabColorBindings == {os.path.realpath(wd): "teal"}
+    assert _tabIconKey(mainWindow, 0) == _dotKey("teal")
+    assert _tabIconKey(mainWindow, 1) == _dotKey("teal")
+
+
+def testWorktreeOverride(tempDir, mainWindow):
+    wd, linked, rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color/orange")
+
+    # Override child to "none": child dot disappears, main keeps it
+    menu = mainWindow.generateTabContextMenu(1)
+    triggerMenuAction(menu, "tab color/only this worktree/no color")
+    assert rwChild.repoModel.prefs.tabColorOverride == "none"
+    assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
+    assert _tabIconKey(mainWindow, 1) is None
+
+    # Override child to blue: child blue, main orange
+    menu = mainWindow.generateTabContextMenu(1)
+    triggerMenuAction(menu, "tab color/only this worktree/blue")
+    assert rwChild.repoModel.prefs.tabColorOverride == "blue"
+    assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
+    assert _tabIconKey(mainWindow, 1) == _dotKey("blue")
+    menu = mainWindow.generateTabContextMenu(1)
+    assert findMenuAction(menu, "tab color/only this worktree/blue").isChecked()
+
+    # Back to Auto: child follows the binding again
+    menu = mainWindow.generateTabContextMenu(1)
+    triggerMenuAction(menu, "tab color/only this worktree/auto")
+    assert rwChild.repoModel.prefs.tabColorOverride == ""
+    assert _tabIconKey(mainWindow, 1) == _dotKey("orange")
+    menu = mainWindow.generateTabContextMenu(1)
+    assert findMenuAction(menu, "tab color/only this worktree/auto").isChecked()
+
+
+def testUnloadedStubTabKeepsBindingDot(tempDir, mainWindow):
+    from gitfourchette.forms.repostub import RepoStub
+    wd, linked, rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color/purple")
+
+    mainWindow.tabs.setCurrentIndex(1)
+    mainWindow.unloadOtherTabs(1)  # tab 0 becomes a RepoStub
+    assert isinstance(mainWindow.tabs.widget(0), RepoStub)
+    assert _tabIconKey(mainWindow, 0) == _dotKey("purple")
+
+    # Binding actions still work on a stub tab; worktree submenu is disabled
+    menu = mainWindow.generateTabContextMenu(0)
+    worktreeAction = findMenuAction(menu, "tab color/only this worktree")
+    assert not worktreeAction.isEnabled()
+    triggerMenuAction(menu, "tab color/green")
+    assert _tabIconKey(mainWindow, 0) == _dotKey("green")
+
+
+def testTabColorPersistenceAcrossReopen(tempDir, mainWindow):
+    wd, linked, rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color/orange")
+    menu = mainWindow.generateTabContextMenu(1)
+    triggerMenuAction(menu, "tab color/only this worktree/blue")
+
+    mainWindow.closeTab(1)  # writes the child's RepoPrefs (tabColorOverride)
+    mainWindow.closeTab(0)
+    assert mainWindow.tabs.count() == 0
+
+    mainWindow.openRepo(wd)
+    mainWindow.openRepo(linked)
+    assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
+    assert _tabIconKey(mainWindow, 1) == _dotKey("blue")
+
+
+def testUrgentIconWinsUntilTabActivated(tempDir, mainWindow):
+    wd = unpackRepo(tempDir, renameTo="MainRepo")
+    wd2 = unpackRepo(tempDir, renameTo="OtherRepo")
+    mainWindow.openRepo(wd)
+    mainWindow.openRepo(wd2)  # tab 1 is now current
+
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color/red")
+    assert _tabIconKey(mainWindow, 0) == _dotKey("red")
+
+    # Urgent icon takes over the icon slot on the background tab
+    mainWindow.tabs.requestAttention(0)
+    urgentKey = _tabIconKey(mainWindow, 0)
+    assert urgentKey is not None
+    assert urgentKey != _dotKey("red")
+
+    # A refresh must NOT stomp the urgent icon while the flag is set
+    mainWindow.refreshTabColors()
+    assert _tabIconKey(mainWindow, 0) == urgentKey
+
+    # Activating the tab clears the urgent icon and restores the dot
+    mainWindow.tabs.setCurrentIndex(0)
+    assert _tabIconKey(mainWindow, 0) == _dotKey("red")
