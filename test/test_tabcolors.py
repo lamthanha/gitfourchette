@@ -6,6 +6,7 @@ import os
 from types import SimpleNamespace
 
 from gitfourchette import tabcolors
+from gitfourchette.application import GFApplication
 from .util import *
 
 
@@ -246,3 +247,61 @@ def testUrgentIconWinsUntilTabActivated(tempDir, mainWindow):
     # Activating the tab clears the urgent icon and restores the dot
     mainWindow.tabs.setCurrentIndex(0)
     assert _tabIconKey(mainWindow, 0) == _dotKey("red")
+
+
+def _bindOrange(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    mainWindow.openRepo(wd)
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color/orange")
+    return wd
+
+
+def testManageTabColorsOpensSettingsOnBindingsList(tempDir, mainWindow):
+    _bindOrange(tempDir, mainWindow)
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color/manage tab colors")
+    dlg = findQDialog(mainWindow, "settings")
+    listWidget: QListWidget = dlg.findChild(QListWidget, "tabColorBindingsList")
+    assert listWidget is not None
+    assert listWidget.count() == 1
+    assert not listWidget.item(0).icon().isNull()
+    dlg.reject()
+
+
+def testRemoveBindingViaSettings(tempDir, mainWindow):
+    from gitfourchette import settings
+    wd = _bindOrange(tempDir, mainWindow)
+    assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
+
+    dlg = GFApplication.instance().openPrefsDialog("tabColorBindings")
+    listWidget: QListWidget = dlg.findChild(QListWidget, "tabColorBindingsList")
+    removeButton: QPushButton = dlg.findChild(QPushButton, "tabColorBindingsRemove")
+    assert listWidget.count() == 1
+    assert listWidget.item(0).data(Qt.ItemDataRole.UserRole) == os.path.realpath(wd)
+
+    listWidget.setCurrentRow(0)
+    removeButton.click()
+    assert listWidget.count() == 0
+
+    # Working-copy semantics: nothing applied until OK
+    assert settings.prefs.tabColorBindings == {os.path.realpath(wd): "orange"}
+
+    dlg.accept()
+    assert settings.prefs.tabColorBindings == {}
+    assert _tabIconKey(mainWindow, 0) is None
+
+
+def testRemoveBindingCancelKeepsBinding(tempDir, mainWindow):
+    from gitfourchette import settings
+    wd = _bindOrange(tempDir, mainWindow)
+
+    dlg = GFApplication.instance().openPrefsDialog("tabColorBindings")
+    listWidget: QListWidget = dlg.findChild(QListWidget, "tabColorBindingsList")
+    removeButton: QPushButton = dlg.findChild(QPushButton, "tabColorBindingsRemove")
+    listWidget.setCurrentRow(0)
+    removeButton.click()
+    dlg.reject()
+
+    assert settings.prefs.tabColorBindings == {os.path.realpath(wd): "orange"}
+    assert _tabIconKey(mainWindow, 0) == _dotKey("orange")

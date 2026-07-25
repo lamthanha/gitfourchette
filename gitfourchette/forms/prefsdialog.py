@@ -400,6 +400,8 @@ class PrefsDialog(QDialog):
                 presets[_("Built-in git (sandboxed)")] = builtInGit
             presets[_("Auto-detected system git")] = ToolPresets.defaultGit(hostOnly=True)
             return self.strControlWithPresets(key, value, presets)
+        elif key == "tabColorBindings":
+            return self.tabColorBindingsControl(key, value)
         elif issubclass(valueType, enum.Enum):
             return self.enumControl(key, value, type(value))
         elif valueType is int:
@@ -683,6 +685,42 @@ class PrefsDialog(QDialog):
 
         control.activated.connect(onPickStyle)
         return control
+
+    def tabColorBindingsControl(self, prefKey: str, prefValue: dict):
+        from gitfourchette.tabcolors import TAB_PALETTE, tabDotIcon
+
+        listWidget = QListWidget(self)
+        listWidget.setObjectName("tabColorBindingsList")
+        listWidget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        listWidget.setMinimumHeight(120)
+
+        removeButton = QPushButton(_("Remo&ve Selected Binding"), self)
+        removeButton.setObjectName("tabColorBindingsRemove")
+
+        def refill():
+            listWidget.clear()
+            bindings = self.getMostRecentValue(prefKey)
+            for path in sorted(bindings):
+                colorName = bindings[path]
+                icon = tabDotIcon(colorName) if colorName in TAB_PALETTE else QIcon()
+                item = QListWidgetItem(icon, compactPath(path), listWidget)
+                item.setData(Qt.ItemDataRole.UserRole, path)
+                item.setToolTip(path)
+            removeButton.setEnabled(listWidget.count() > 0)
+
+        def onRemove():
+            item = listWidget.currentItem()
+            if item is None:
+                return
+            path = item.data(Qt.ItemDataRole.UserRole)
+            newBindings = dict(self.getMostRecentValue(prefKey))
+            newBindings.pop(path, None)
+            self.assign(prefKey, newBindings)
+            refill()
+
+        removeButton.clicked.connect(onRemove)
+        refill()
+        return vBoxWidget(listWidget, removeButton)
 
     def prependCheckBox(self, rowWidgets: list[QWidget], booleanKey: str, caption: str) -> QCheckBox:
         """

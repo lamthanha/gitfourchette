@@ -161,6 +161,7 @@ class Prefs(PrefsFile):
     tabCloseButton              : bool                  = True
     expandingTabs               : bool                  = True
     autoHideTabs                : bool                  = False
+    tabColorBindings            : dict[str, str]        = dataclasses.field(default_factory=dict)
 
     _category_mouseShortcuts    : int                   = 0
     _label_tabBarClicks         : int                   = 0
@@ -200,7 +201,6 @@ class Prefs(PrefsFile):
     resetDontShowAgain          : bool                  = False
     donatePrompt                : int                   = 0
     refSortClearTimestamp       : int                   = 0
-    tabColorBindings            : dict[str, str]        = dataclasses.field(default_factory=dict)
 
     @property
     def listViewScrollMode(self) -> QAbstractItemView.ScrollMode:
