@@ -57,7 +57,7 @@ class SidebarDelegate(QStyledItemDelegate):
     def getClickZone(node: SidebarNode, rect: QRect, x: int):
         if node.kind == SidebarItem.Spacer:
             return SidebarClickZone.Invalid
-        elif node.mayHaveChildren() and x < rect.left():
+        elif node.mayHaveChildren() and node.children and x < rect.left():
             return SidebarClickZone.Expand
         elif node.canBeHidden() and x > rect.right() - EYE_WIDTH - PADDING:
             return SidebarClickZone.Hide
@@ -118,7 +118,7 @@ class SidebarDelegate(QStyledItemDelegate):
         SidebarDelegate.unindentRect(node.kind, option.rect, view.indentation())
 
         # Draw expand/collapse triangle.
-        if node.mayHaveChildren() and not node.wantForceExpand():
+        if node.mayHaveChildren() and node.children and not node.wantForceExpand():
             opt2 = QStyleOptionViewItem(option)
             opt2.rect.adjust(-(EXPAND_TRIANGLE_WIDTH + PADDING), 0, 0, 0)  # args must be integers for pyqt5!
             opt2.rect.setWidth(EXPAND_TRIANGLE_WIDTH)

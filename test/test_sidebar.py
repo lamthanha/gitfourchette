@@ -10,6 +10,7 @@ import re
 from gitfourchette.nav import NavLocator
 from gitfourchette.repomodel import UC_FAKEID
 from gitfourchette.sidebar.sidebarmodel import SidebarItem, SidebarModel
+from gitfourchette.sidebar.sidebardelegate import SidebarDelegate, SidebarClickZone
 from gitfourchette.toolbox import naturalSort
 from .util import *
 
@@ -877,3 +878,30 @@ def testStarredBranchPrunedWhenBranchDeleted(tempDir, mainWindow):
 
     assert not rw.sidebar.findNodesByKind(SidebarItem.StarredHeader)
     assert "refs/heads/doomed" not in rw.sidebar.sidebarModel.repoModel.prefs.starredRefs
+
+
+def testNoExpandZoneOnChildlessNodes(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    # Canned repo has no stashes: header exists but is childless
+    stashes = rw.sidebar.findNodeByKind(SidebarItem.StashesHeader)
+    assert not stashes.children
+    rect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(stashes))
+    arrowX = rect.left() - 5  # inside the expand-arrow band (x < rect.left())
+    assert SidebarDelegate.getClickZone(stashes, rect, arrowX) == SidebarClickZone.Select
+
+    # Sections that DO have children keep their Expand zone
+    branches = rw.sidebar.findNodeByKind(SidebarItem.LocalBranchesHeader)
+    assert branches.children
+    brect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(branches))
+    assert SidebarDelegate.getClickZone(branches, brect, brect.left() - 5) == SidebarClickZone.Expand
+
+    # Behavior level: a real click on the (now nonexistent) arrow band of a
+    # childless header merely selects the row and never expands it
+    # (isExpanded is NOT asserted: Qt may keep a stored expanded flag on a
+    # childless item; what matters is that the click selects the row.)
+    stashesIndex = rw.sidebar.nodeToFilterIndex(stashes)
+    QTest.mouseClick(rw.sidebar.viewport(), Qt.MouseButton.LeftButton,
+                     pos=QPoint(rect.left() - 5, rect.center().y()))
+    assert rw.sidebar.currentIndex() == stashesIndex
