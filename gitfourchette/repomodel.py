@@ -533,6 +533,31 @@ class RepoModel:
             matchingRefs, numStalePatterns = self._matchPatterns(hidePatterns)
             self.hiddenRefs.update(matchingRefs)
 
+        # Fork: local-first hide-pairing. A local branch's visibility drags its
+        # upstream remote-tracking ref along, in both modes:
+        # - hide mode: upstreams of hidden locals become implicitly hidden,
+        #   unless a VISIBLE local also tracks the same upstream;
+        # - solo mode: upstreams of visible locals are shown alongside them.
+        # Hiding a remote ref directly still affects only that ref.
+        # Only refs that exist may enter hiddenRefs (getHiddenTips indexes refs).
+        if showPatterns or hidePatterns:
+            pairedHidden = set()
+            pairedVisible = set()
+            for localName, upstreamShorthand in self.upstreams.items():
+                if not upstreamShorthand:
+                    continue
+                remoteRef = RefPrefix.REMOTES + upstreamShorthand
+                if remoteRef not in self.refs:
+                    continue
+                if RefPrefix.HEADS + localName in self.hiddenRefs:
+                    pairedHidden.add(remoteRef)
+                else:
+                    pairedVisible.add(remoteRef)
+            if showPatterns:
+                self.hiddenRefs.difference_update(pairedVisible)
+            else:
+                self.hiddenRefs.update(pairedHidden - pairedVisible)
+
         if numStalePatterns > 0:
             self.prefs.setDirty()
 

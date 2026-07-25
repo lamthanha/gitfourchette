@@ -334,8 +334,8 @@ def testHideNestedRefFolders(tempDir, mainWindow, explicit, implicit, method):
 
 
 @pytest.mark.parametrize("explicit,implicit", [
-    ("refs/heads/master", []),
-    ("refs/heads/no-parent", []),
+    ("refs/heads/master", ["refs/remotes/origin/master"]),  # fork: solo shows the tracked pair
+    ("refs/heads/no-parent", ["refs/remotes/origin/no-parent"]),  # fork: solo shows the tracked pair
     ("refs/heads/1", ["refs/heads/1/2A/3A", "refs/heads/1/2A/3B", "refs/heads/1/2B"]),
     ("refs/heads/1/2A", ["refs/heads/1/2A/3A", "refs/heads/1/2A/3B"]),
     ("refs/remotes/origin/no-parent", []),
@@ -1383,3 +1383,67 @@ def testSecondLevelRowsIndentDeeperThanHeaders(tempDir, mainWindow):
     # Fork: second-level rows sit CHILD_EXTRA_INDENT px right of their headers
     # (upstream unindents them a full level, flush with the headers).
     assert branchRect.left() == headerRect.left() + CHILD_EXTRA_INDENT
+
+
+def testHideLocalBranchAlsoHidesUpstreamPair(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    repoModel = rw.repoModel
+    assert repoModel.upstreams["master"] == "origin/master"
+
+    rw.toggleHideRefPattern("refs/heads/master")
+    assert "refs/heads/master" in repoModel.hiddenRefs
+    assert "refs/remotes/origin/master" in repoModel.hiddenRefs
+
+    # The paired upstream is IMPLICITLY hidden (indirect eye), not explicitly
+    sm = rw.sidebar.sidebarModel
+    remoteNode = rw.sidebar.findNodeByRef("refs/remotes/origin/master")
+    assert sm.isImplicitlyHidden(remoteNode)
+    assert not sm.isExplicitlyHidden(remoteNode)
+
+    # Un-hiding the local restores the pair
+    rw.toggleHideRefPattern("refs/heads/master")
+    assert "refs/heads/master" not in repoModel.hiddenRefs
+    assert "refs/remotes/origin/master" not in repoModel.hiddenRefs
+
+
+def testHideRemoteBranchLeavesLocalAlone(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    repoModel = rw.repoModel
+
+    rw.toggleHideRefPattern("refs/remotes/origin/master")
+    assert "refs/remotes/origin/master" in repoModel.hiddenRefs
+    assert "refs/heads/master" not in repoModel.hiddenRefs
+
+
+def testSoloLocalBranchKeepsUpstreamVisible(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    repoModel = rw.repoModel
+
+    rw.toggleHideRefPattern("refs/heads/master", allButThis=True)
+    assert "refs/heads/master" not in repoModel.hiddenRefs
+    assert "refs/remotes/origin/master" not in repoModel.hiddenRefs
+
+    # Everything else stays hidden in solo mode
+    others = [r for r in repoModel.refs
+              if r.startswith("refs/remotes/") and r != "refs/remotes/origin/master"]
+    assert others, "canned repo should have other remote refs"
+    assert all(r in repoModel.hiddenRefs for r in others)
+
+
+def testHideLocalWithGoneUpstreamDoesNotInjectBogusRef(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        # Point no-parent at an upstream whose remote-tracking ref doesn't exist
+        repo.config["branch.no-parent.remote"] = "origin"
+        repo.config["branch.no-parent.merge"] = "refs/heads/gone"
+
+    rw = mainWindow.openRepo(wd)
+    assert rw.repoModel.upstreams["no-parent"] == "origin/gone"
+
+    # Must not crash (getHiddenTips indexes refs with every member of hiddenRefs)
+    rw.toggleHideRefPattern("refs/heads/no-parent")
+    assert "refs/heads/no-parent" in rw.repoModel.hiddenRefs
+    assert "refs/remotes/origin/gone" not in rw.repoModel.hiddenRefs
