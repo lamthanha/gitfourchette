@@ -36,7 +36,7 @@ gitfourchette-askpass = "gitfourchette.forms.askpassdialog:main"
 gitfourchette-mount = "gitfourchette.mount.treemount:main"
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-qt", "pytest-cov", "pytest-xdist", "ruff"]
+test = ["pytest", "pytest-qt", "pytest-cov", "pytest-xdist", "ruff==0.16.*"]
 pyqt6 = ["pyqt6"]
 # WARNING: PyQt5 support is deprecated and will be removed soon
 pyqt5 = ["pyqt5"]
@@ -140,7 +140,9 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-extend-select = ['W', 'E', 'F', 'C', 'N9', 'B', 'U']
+# Explicit select (not extend-select): don't inherit ruff's version-dependent
+# default rule set, so a newer ruff can't redden CI without a code change.
+select = ['W', 'E', 'F', 'C', 'N9', 'B', 'U']
 # E501: line too long
 # F403: star imports
 # F405: star imports

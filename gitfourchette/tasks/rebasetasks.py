@@ -327,7 +327,7 @@ def rebaseProgress(repo: Repo) -> tuple[int, int, str]:
         if not base.is_dir():
             continue
 
-        def read(name: str) -> str:
+        def read(name: str, base: Path = base) -> str:
             with suppress(OSError):
                 return (base / name).read_text("utf-8").strip()
             return ""
