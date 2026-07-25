@@ -505,8 +505,10 @@ class FastForwardBranch(RepoTask):
                 _("The branches are divergent."))
             qmb = showWarning(parentWidget, self.name(), text)
 
-            # If it's the checked-out branch, suggest merging
-            if lb.is_checked_out():
+            # If it's the branch checked out in THIS worktree, suggest merging.
+            # (Not is_checked_out(), which is worktree-wide: merging targets
+            # this worktree's HEAD, not a branch held by another worktree.)
+            if lb.shorthand == self.repoModel.homeBranch:
                 mergeCaption = _("Merge into {0}", lquoe(lb.shorthand))
                 mergeButton = qmb.addButton(mergeCaption, QMessageBox.ButtonRole.ActionRole)
                 mergeButton.clicked.connect(lambda: MergeBranch.invoke(parentWidget, rb.name))
@@ -533,7 +535,11 @@ class FastForwardBranch(RepoTask):
             raise NotImplementedError(f"Cannot fast-forward with {repr(analysis)}.")
 
         self.epilog.effects |= TaskEffects.Refs
-        if branch.is_checked_out():
+        # Not branch.is_checked_out(): that's worktree-wide, but `git merge`
+        # only ever fast-forwards THIS worktree's HEAD. For a branch held by
+        # another worktree, update the ref with `git push .` instead (git
+        # refuses the update if that worktree has the branch checked out).
+        if branch.shorthand == self.repoModel.homeBranch:
             self.epilog.effects |= TaskEffects.Head
             args = ["merge", "--ff-only", "--progress", branch.upstream_name]
         else:

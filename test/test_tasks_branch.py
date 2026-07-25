@@ -909,6 +909,70 @@ def testFastForwardDivergent(tempDir, mainWindow):
     acceptQMessageBox(rw, "can.+t fast.forward.+branches are divergent")
 
 
+def testFastForwardBranchCheckedOutInOtherWorktree(tempDir, mainWindow):
+    # Branch.is_checked_out() is worktree-wide, so FastForwardBranch used to
+    # take the `git merge --ff-only` path for a branch held by ANOTHER
+    # worktree, silently fast-forwarding THIS worktree's branch instead.
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        repo.checkout_local_branch("no-parent")
+        noParentTip = repo.branches["no-parent"].target
+        repo.create_branch_on_head("wtbranch")
+        repo.edit_upstream_branch("wtbranch", "origin/master")
+    runShellScript("git worktree add ../LinkedWT wtbranch", wd)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/wtbranch")
+    menu = rw.sidebar.makeNodeMenu(node)
+    triggerMenuAction(menu, "fast.forward")
+
+    # git itself refuses to update a branch that's checked out in another
+    # worktree; the task must surface that error rather than fast-forward
+    # the current branch.
+    acceptQMessageBox(rw, "can.+t fast.forward")
+
+    # Neither the home branch nor the workdir may have budged
+    assert rw.repo.head_branch_shorthand == "no-parent"
+    assert rw.repo.branches["no-parent"].target == noParentTip
+    assert not os.path.exists(f"{wd}/a/a1")
+    assert rw.repo.branches["wtbranch"].target == noParentTip
+
+
+def testFastForwardDivergentBranchCheckedOutInOtherWorktreeOmitsMergeButton(tempDir, mainWindow):
+    # "Merge into..." merges into THIS worktree's checked-out branch, so the
+    # shortcut must not be offered when the divergent branch belongs to
+    # another worktree (Branch.is_checked_out() alone can't tell them apart).
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        repo.edit_upstream_branch("no-parent", "origin/first-merge")
+    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    menu = rw.sidebar.makeNodeMenu(node)
+    triggerMenuAction(menu, "fast.forward")
+
+    qmb = findQMessageBox(rw, "can.+t fast.forward.+branches are divergent")
+    assert not any(re.search("merge", button.text(), re.IGNORECASE) for button in qmb.buttons())
+    qmb.accept()
+
+
+def testFastForwardDivergentCurrentBranchOffersMergeButton(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        repo.checkout_local_branch("no-parent")
+        repo.edit_upstream_branch("no-parent", "origin/first-merge")
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    menu = rw.sidebar.makeNodeMenu(node)
+    triggerMenuAction(menu, "fast.forward")
+
+    qmb = findQMessageBox(rw, "can.+t fast.forward.+branches are divergent")
+    assert any(re.search("merge into", button.text(), re.IGNORECASE) for button in qmb.buttons())
+    qmb.accept()
+
+
 def testMergeUpToDate(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     rw = mainWindow.openRepo(wd)

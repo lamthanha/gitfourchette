@@ -1366,7 +1366,11 @@ class Repo(_VanillaRepository):
             # otherwise the contents of the commits we're pulling will spill into the unstaged area.
             # Note: checkout_tree defaults to a safe checkout, so it'll raise GitError if any uncommitted changes
             # affect any of the files that are involved in the pull.
-            if lb.is_checked_out():
+            # Only do this if lb is checked out HERE -- is_checked_out() is worktree-wide,
+            # and a checkout held by another worktree must not clobber this workdir.
+            head_on_lb = (not self.head_is_unborn and not self.head_is_detached
+                          and self.head_branch_fullname == lb.name)
+            if head_on_lb:
                 with CheckoutBreakdown() as callbacks:
                     self.checkout_tree(rb.peel(Tree), callbacks=callbacks)
 
