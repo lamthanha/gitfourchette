@@ -13,13 +13,13 @@
 ## Sanctioned deviations from the spec (decided at plan time — do not "fix" these back)
 
 1. **No `OpenWorktree` task class.** Opening is a pure UI navigation (no git mutation, no flow) — it uses the Submodule pattern instead: a `Sidebar.openWorktreeRepo = Signal(str)` chained through `RepoWidget.openRepo` → `MainWindow.openRepoNextTo`. Registering a task that only emits a signal would be taskbook boilerplate. Surface in the final summary.
-2. **`TaskEffects` gains no `Worktrees` flag.** Worktree tasks set `TaskEffects.Refs`, and `syncWorktrees()` is gated on `Refs | Head` — same idiom as submodules ("no TaskEffects.Submodules, so .Refs is the next best thing", submoduletasks.py:105-109).
+2. **`TaskEffects` gains no `Worktrees` flag.** Worktree tasks set `TaskEffects.Refs`; the refresh-path listing (flowCallGit + `updateWorktrees`) is gated on `Refs | Head` — same idiom as submodules ("no TaskEffects.Submodules, so .Refs is the next best thing", submoduletasks.py:105-109).
 3. **`PruneWorktrees` runs without a confirm dialog** — prune only deletes stale admin entries (never working files) and is idempotent; its header-menu entry stays always-enabled.
 
 ## Global Constraints
 
 - Test runner prefix: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest` from the worktree root. Full suite must be **0 failed** on top of baseline (1021 passed / 16 skipped at branch point `bf693995`).
-- Mutations run the real git binary via `RepoTask.flowCallGit(...)` — NEVER reimplement worktree add/remove/prune in pygit2. pygit2 is for reads only. `git worktree list --porcelain` (a read) goes through `GitDriver.runSync`.
+- Mutations run the real git binary via `RepoTask.flowCallGit(...)` — NEVER reimplement worktree add/remove/prune in pygit2. pygit2 is for reads only. `git worktree list --porcelain` (a read) goes through `flowCallGit` on UI-thread paths (RefreshRepo/PrimeRepo); the blocking `GitDriver.runSync` helper (`listWorktrees`) is for tests only.
 - **This phase DOES edit `tasks/__init__.py` and `taskbook.py`** (unlike the tab-colors feature): CLAUDE.md mandates registering new tasks in BOTH — `tasks/__init__.py` gets its own `from gitfourchette.tasks.worktreetasks import (...)` block (names alphabetized within the block, block placed after the rebasetasks block), `TaskBook.names` entries go at their alphabetically-correct slots. NO `TaskBook.icons` entries (fork rule — no icon assets).
 - `SidebarItem` members `WorktreesHeader` and `Worktree` are appended AT THE ENUM TAIL (after `StarredHeader`) — never inserted among existing members. The delegate's canned-string check (`sidebardelegate.py` ~line 249: `node.kind <= SidebarItem.SubmodulesHeader or node.kind == SidebarItem.StarredHeader`) must be extended with `or node.kind == SidebarItem.WorktreesHeader`.
 - `Branch.is_checked_out()` is worktree-wide — NEVER use it to mean "current branch". Not needed in this plan; do not introduce it.
