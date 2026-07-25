@@ -114,13 +114,17 @@ def testTabColorPrefFieldsDefaultsAndRoundTrip(tempDir, mainWindow):
 
     # Global bindings dict: default empty, survives write/load
     assert settings.prefs.tabColorBindings == {}
+    assert settings.prefs.tabColorOverrides == {}
     settings.prefs.tabColorBindings["/some/path"] = "teal"
+    settings.prefs.tabColorOverrides["/some/wt"] = "none"
     settings.prefs.setDirty()
     assert settings.prefs.write(force=True)
     settings.prefs.reset()
     assert settings.prefs.tabColorBindings == {}
+    assert settings.prefs.tabColorOverrides == {}
     settings.prefs.load()
     assert settings.prefs.tabColorBindings == {"/some/path": "teal"}
+    assert settings.prefs.tabColorOverrides == {"/some/wt": "none"}
 
     # Per-worktree override: default empty on a real repo
     wd = unpackRepo(tempDir)
@@ -248,6 +252,15 @@ def testRepositoryMenuStaysUsableWhileOverridden(tempDir, mainWindow):
     triggerMenuAction(menu, "tab color: repository/^green$")
     assert _tabIconKey(mainWindow, 0) == _dotKey("green")   # sibling follows the binding
     assert _tabIconKey(mainWindow, 1) == _dotKey("red")     # this tab keeps its override
+
+
+def testBogusOverrideValueChecksInherited(tempDir, mainWindow):
+    from gitfourchette import settings
+    _wd, linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    settings.prefs.tabColorOverrides[os.path.realpath(linked)] = "bogus"
+    menu = mainWindow.generateTabContextMenu(1)
+    assert findMenuAction(menu, "tab color: this worktree/inherited").isChecked()
+    assert not findMenuAction(menu, "tab color: this worktree/^no color$").isChecked()
 
 
 def testOrphanOverrideKeepsWorktreeMenuOnSingleWorktreeRepo(tempDir, mainWindow):
