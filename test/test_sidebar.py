@@ -823,6 +823,14 @@ def testStarBranch(tempDir, mainWindow):
 
     # The alias carries a fully functional branch menu; unstar via the alias
     masterAlias = next(c for c in starRoot.children if c.data == "refs/heads/master")
+    # Pin: the checked-out branch's alias inherits bold + HEAD icon ('master'
+    # is checked out in the canned repo); other aliases stay non-bold.
+    masterAliasIndex = rw.sidebar.nodeToFilterIndex(masterAlias)
+    boldFont = masterAliasIndex.data(Qt.ItemDataRole.FontRole)
+    assert boldFont is not None and boldFont.bold()
+    assert masterAliasIndex.data(SidebarModel.Role.IconKey) == "git-head"
+    folderFont = folderAliasIndex.data(Qt.ItemDataRole.FontRole)
+    assert folderFont is None or not folderFont.bold()
     menu = rw.sidebar.makeNodeMenu(masterAlias)
     assert findMenuAction(menu, r"switch to")
     triggerMenuAction(menu, r"^unstar branch")
