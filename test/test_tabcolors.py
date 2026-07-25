@@ -8,6 +8,8 @@
 
 import os
 
+import pytest
+
 from gitfourchette import tabcolors
 from gitfourchette.application import GFApplication
 
@@ -146,6 +148,110 @@ def _openMainAndLinkedWorktree(tempDir, mainWindow):
     return wd, linked, rwMain, rwChild
 
 
+def testSingleWorktreeRepoHasFlatColorMenu(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    mainWindow.openRepo(wd)
+    menu = mainWindow.generateTabContextMenu(0)
+    # Exactly one color menu, plainly titled — no worktree scope shown
+    assert findMenuAction(menu, "^tab color$") is not None
+    with pytest.raises(KeyError):
+        findMenuAction(menu, "this worktree")
+    triggerMenuAction(menu, "tab color/red")
+    assert _tabIconKey(mainWindow, 0) == _dotKey("red")
+
+
+def testMultiWorktreeRepoSplitsColorMenus(tempDir, mainWindow):
+    _wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    menu = mainWindow.generateTabContextMenu(0)
+    assert findMenuAction(menu, "tab color: repository") is not None
+    assert findMenuAction(menu, "tab color: this worktree") is not None
+    # Repository scope binds the whole repo
+    triggerMenuAction(menu, "tab color: repository/orange")
+    assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
+    assert _tabIconKey(mainWindow, 1) == _dotKey("orange")
+    # Worktree scope overrides only this worktree
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color: this worktree/blue")
+    assert _tabIconKey(mainWindow, 0) == _dotKey("blue")
+    assert _tabIconKey(mainWindow, 1) == _dotKey("orange")
+
+
+def testInheritedEntryShowsBindingColor(tempDir, mainWindow):
+    _wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    menu = mainWindow.generateTabContextMenu(1)
+    triggerMenuAction(menu, "tab color: repository/green")
+
+    menu = mainWindow.generateTabContextMenu(1)
+    inherited = findMenuAction(menu, r"tab color: this worktree/inherited \(green\)")
+    assert inherited.isChecked()
+    assert not inherited.icon().isNull()
+
+    # Override then return to inherited
+    triggerMenuAction(menu, "tab color: this worktree/red")
+    menu = mainWindow.generateTabContextMenu(1)
+    assert not findMenuAction(menu, r"tab color: this worktree/inherited").isChecked()
+    triggerMenuAction(menu, r"tab color: this worktree/inherited")
+    assert _tabIconKey(mainWindow, 1) == _dotKey("green")
+
+    # Without a binding, the label says Inherited (No Color)
+    menu = mainWindow.generateTabContextMenu(1)
+    triggerMenuAction(menu, "tab color: repository/no color")
+    menu = mainWindow.generateTabContextMenu(1)
+    assert findMenuAction(menu, r"tab color: this worktree/inherited \(no color\)") is not None
+
+
+def testStatusRowShowsEffectiveColorAndProvenance(tempDir, mainWindow):
+    _wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    # No binding, no override: no status row anywhere
+    menu = mainWindow.generateTabContextMenu(0)
+    with pytest.raises(KeyError):
+        findMenuAction(menu, "tab color: repository/repository color")
+
+    triggerMenuAction(menu, "tab color: repository/green")
+    menu = mainWindow.generateTabContextMenu(0)
+    status = findMenuAction(menu, "tab color: repository/green — repository color")
+    assert not status.isEnabled()
+    assert not status.icon().isNull()
+
+    triggerMenuAction(menu, "tab color: this worktree/red")
+    menu = mainWindow.generateTabContextMenu(0)
+    for scope in ("repository", "this worktree"):
+        status = findMenuAction(menu, f"tab color: {scope}/red — set for this worktree")
+        assert not status.isEnabled()
+
+    # "none" override reads as No color, set for this worktree
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color: this worktree/no color")
+    menu = mainWindow.generateTabContextMenu(0)
+    assert findMenuAction(menu, "tab color: repository/no color — set for this worktree") is not None
+
+
+def testOrphanOverrideKeepsWorktreeMenuOnSingleWorktreeRepo(tempDir, mainWindow):
+    from gitfourchette import settings
+    wd = unpackRepo(tempDir)
+    settings.prefs.tabColorOverrides[os.path.realpath(wd)] = "red"
+    mainWindow.openRepo(wd)
+    assert _tabIconKey(mainWindow, 0) == _dotKey("red")
+    # No linked worktrees, but the override must stay visible/clearable from the menu
+    menu = mainWindow.generateTabContextMenu(0)
+    assert findMenuAction(menu, "tab color: this worktree/red").isChecked()
+    triggerMenuAction(menu, r"tab color: this worktree/inherited")
+    assert _tabIconKey(mainWindow, 0) is None
+    # Once cleared, the repo is back to a flat single menu
+    menu = mainWindow.generateTabContextMenu(0)
+    with pytest.raises(KeyError):
+        findMenuAction(menu, "this worktree")
+
+
+def testRepoHasLinkedWorktrees(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    assert not tabcolors.repoHasLinkedWorktrees(wd)
+    runShellScript("git worktree add ../LinkedWT", wd)
+    linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
+    assert tabcolors.repoHasLinkedWorktrees(wd)
+    assert tabcolors.repoHasLinkedWorktrees(linked)
+
+
 def testBindWholeRepoFromMainTab(tempDir, mainWindow):
     from gitfourchette import settings
     wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
@@ -153,7 +259,7 @@ def testBindWholeRepoFromMainTab(tempDir, mainWindow):
     assert _tabIconKey(mainWindow, 1) is None
 
     menu = mainWindow.generateTabContextMenu(0)
-    triggerMenuAction(menu, "tab color/orange")
+    triggerMenuAction(menu, "tab color: repository/orange")
 
     assert settings.prefs.tabColorBindings == {os.path.realpath(wd): "orange"}
     assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
@@ -162,12 +268,12 @@ def testBindWholeRepoFromMainTab(tempDir, mainWindow):
     # Regenerated menu shows the current binding checked, on both tabs
     for i in range(2):
         menu = mainWindow.generateTabContextMenu(i)
-        assert findMenuAction(menu, "tab color/orange").isChecked()
-        assert not findMenuAction(menu, "tab color/no color").isChecked()
+        assert findMenuAction(menu, "tab color: repository/orange").isChecked()
+        assert not findMenuAction(menu, "tab color: repository/no color").isChecked()
 
     # No Color removes the binding and both dots
     menu = mainWindow.generateTabContextMenu(0)
-    triggerMenuAction(menu, "tab color/no color")
+    triggerMenuAction(menu, "tab color: repository/no color")
     assert settings.prefs.tabColorBindings == {}
     assert _tabIconKey(mainWindow, 0) is None
     assert _tabIconKey(mainWindow, 1) is None
@@ -178,7 +284,7 @@ def testBindWholeRepoFromChildWorktreeTab(tempDir, mainWindow):
     wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
 
     menu = mainWindow.generateTabContextMenu(1)  # child worktree's tab
-    triggerMenuAction(menu, "tab color/teal")
+    triggerMenuAction(menu, "tab color: repository/teal")
 
     # Keyed to the MAIN root even when set from the child's tab
     assert settings.prefs.tabColorBindings == {os.path.realpath(wd): "teal"}
@@ -190,60 +296,63 @@ def testWorktreeOverride(tempDir, mainWindow):
     from gitfourchette import settings
     _wd, linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
     menu = mainWindow.generateTabContextMenu(0)
-    triggerMenuAction(menu, "tab color/orange")
+    triggerMenuAction(menu, "tab color: repository/orange")
 
     # Override child to "none": child dot disappears, main keeps it
     menu = mainWindow.generateTabContextMenu(1)
-    triggerMenuAction(menu, "tab color/only this worktree/no color")
+    triggerMenuAction(menu, "tab color: this worktree/no color")
     assert settings.prefs.tabColorOverrides.get(os.path.realpath(linked)) == "none"
     assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
     assert _tabIconKey(mainWindow, 1) is None
 
     # Override child to blue: child blue, main orange
     menu = mainWindow.generateTabContextMenu(1)
-    triggerMenuAction(menu, "tab color/only this worktree/blue")
+    triggerMenuAction(menu, "tab color: this worktree/blue")
     assert settings.prefs.tabColorOverrides.get(os.path.realpath(linked)) == "blue"
     assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
     assert _tabIconKey(mainWindow, 1) == _dotKey("blue")
     menu = mainWindow.generateTabContextMenu(1)
-    assert findMenuAction(menu, "tab color/only this worktree/blue").isChecked()
+    assert findMenuAction(menu, "tab color: this worktree/blue").isChecked()
 
-    # Back to Auto: child follows the binding again
+    # Back to Inherited: child follows the binding again
     menu = mainWindow.generateTabContextMenu(1)
-    triggerMenuAction(menu, "tab color/only this worktree/auto")
+    triggerMenuAction(menu, r"tab color: this worktree/inherited")
     assert os.path.realpath(linked) not in settings.prefs.tabColorOverrides
     assert _tabIconKey(mainWindow, 1) == _dotKey("orange")
     menu = mainWindow.generateTabContextMenu(1)
-    assert findMenuAction(menu, "tab color/only this worktree/auto").isChecked()
+    assert findMenuAction(menu, r"tab color: this worktree/inherited").isChecked()
 
 
 def testUnloadedStubTabKeepsBindingDot(tempDir, mainWindow):
     from gitfourchette.forms.repostub import RepoStub
     _wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
     menu = mainWindow.generateTabContextMenu(0)
-    triggerMenuAction(menu, "tab color/purple")
+    triggerMenuAction(menu, "tab color: repository/purple")
 
     mainWindow.tabs.setCurrentIndex(1)
     mainWindow.unloadOtherTabs(1)  # tab 0 becomes a RepoStub
     assert isinstance(mainWindow.tabs.widget(0), RepoStub)
     assert _tabIconKey(mainWindow, 0) == _dotKey("purple")
 
-    # Binding actions still work on a stub tab; worktree submenu is disabled
+    # Binding and worktree-scope actions both still work on a stub tab (global storage)
     menu = mainWindow.generateTabContextMenu(0)
-    worktreeAction = findMenuAction(menu, "tab color/only this worktree")
-    assert not worktreeAction.isEnabled()
-    triggerMenuAction(menu, "tab color/green")
+    triggerMenuAction(menu, "tab color: this worktree/teal")
+    assert _tabIconKey(mainWindow, 0) == _dotKey("teal")
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, r"tab color: this worktree/inherited")
+    menu2 = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu2, "tab color: repository/green")
     assert _tabIconKey(mainWindow, 0) == _dotKey("green")
 
 
 def testTabColorPersistenceAcrossReopen(tempDir, mainWindow):
     wd, linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
     menu = mainWindow.generateTabContextMenu(0)
-    triggerMenuAction(menu, "tab color/orange")
+    triggerMenuAction(menu, "tab color: repository/orange")
     menu = mainWindow.generateTabContextMenu(1)
-    triggerMenuAction(menu, "tab color/only this worktree/blue")
+    triggerMenuAction(menu, "tab color: this worktree/blue")
 
-    mainWindow.closeTab(1)  # writes the child's RepoPrefs (tabColorOverride)
+    mainWindow.closeTab(1)  # override already persisted to global prefs
     mainWindow.closeTab(0)
     assert mainWindow.tabs.count() == 0
 
