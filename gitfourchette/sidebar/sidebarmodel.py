@@ -81,6 +81,8 @@ class SidebarLayout:
         SidebarItem.Spacer,
         SidebarItem.StarredHeader,
         SidebarItem.Spacer,
+        SidebarItem.WorktreesHeader,
+        SidebarItem.Spacer,
         SidebarItem.LocalBranchesHeader,
         SidebarItem.Spacer,
         SidebarItem.RemotesHeader,
@@ -90,8 +92,6 @@ class SidebarLayout:
         SidebarItem.StashesHeader,
         SidebarItem.Spacer,
         SidebarItem.SubmodulesHeader,
-        SidebarItem.Spacer,
-        SidebarItem.WorktreesHeader,
     ]
 
     ForceExpand = [

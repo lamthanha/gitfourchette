@@ -4,6 +4,7 @@
 # For full terms, see the included LICENSE file.
 # -----------------------------------------------------------------------------
 
+import os
 import warnings
 from collections.abc import Callable, Iterable
 from contextlib import suppress
@@ -202,7 +203,11 @@ class Sidebar(QTreeView):
             branch = repo.branches.local[branchName]
 
             activeBranchName = model.repoModel.homeBranch
-            isCurrentBranch = branch and branch.is_checked_out()
+            # Not branch.is_checked_out(): that's worktree-wide, so it would
+            # also be true for a branch checked out in some OTHER worktree,
+            # wrongly disabling "Switch to" here (see findWorktreeCheckedOutOn).
+            isCurrentBranch = branchName == activeBranchName
+            checkedOutWorktree = self.findWorktreeCheckedOutOn(refName)
             hasUpstream = bool(branch.upstream)
             upstreamBranchName = "" if not hasUpstream else branch.upstream.shorthand
             upstreamSubmenuTitle = _("&Upstream Branch")
@@ -298,6 +303,8 @@ class Sidebar(QTreeView):
 
                 TaskBook.action(self, NewBranchFromRef, _("New &Branch Here…"), taskArgs=refName),
 
+                self.openInWorktreeActionDef(checkedOutWorktree)
+                if checkedOutWorktree is not None else
                 TaskBook.action(self, NewWorktree, _("Checkout in New &Worktree…"), taskArgs=branchName),
 
                 ActionDef(_("&Copy Branch Name"), lambda: self.copyToClipboard(branchName)),
@@ -335,6 +342,8 @@ class Sidebar(QTreeView):
             assert prefix == RefPrefix.REMOTES
 
             remoteName, remoteBranchName = porcelain.split_remote_branch_shorthand(shorthand)
+            localBranchWorktree = self.findWorktreeCheckedOutOn(RefPrefix.HEADS + remoteBranchName)
+            worktreeActions = [self.openInWorktreeActionDef(localBranchWorktree)] if localBranchWorktree is not None else []
             remoteUrl = self.sidebarModel.repo.remotes[remoteName].url
             webUrl, webHost = WebHost.makeLink(remoteUrl, remoteBranchName)
             webActions = []
@@ -353,6 +362,8 @@ class Sidebar(QTreeView):
                 TaskBook.action(self, NewBranchFromRef, _("New Local &Branch Here…"), taskArgs=refName),
 
                 TaskBook.action(self, FetchRemoteBranch, _("&Fetch New Commits"), taskArgs=shorthand),
+
+                *worktreeActions,
 
                 ActionDef.SEPARATOR,
 
@@ -1070,6 +1081,22 @@ class Sidebar(QTreeView):
         assert targetLayer == len(model.collapseCacheLayers) - 1
 
         self.restoreExpandedItems()
+
+    # -------------------------------------------------------------------------
+    # Worktree-aware branch menu helpers (Forkette extension)
+
+    def findWorktreeCheckedOutOn(self, refName: str):
+        """Return the WorktreeInfo checked out on refName (full refname, e.g.
+        "refs/heads/foo"), or None if that branch isn't checked out anywhere.
+        Don't use pygit2's Branch.is_checked_out() for this: it's worktree-wide
+        and doesn't tell us *which* worktree, which is what we need here."""
+        return next((wt for wt in self.sidebarModel.repoModel.worktrees if wt.branch == refName), None)
+
+    def openInWorktreeActionDef(self, wt) -> ActionDef:
+        worktreeName = os.path.basename(os.path.normpath(wt.path))
+        return ActionDef(
+            _("Open in {0} &Worktree", lquo(worktreeName)),
+            lambda path=wt.path: self.openWorktreeRepo.emit(path))
 
     # -------------------------------------------------------------------------
 

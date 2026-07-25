@@ -361,3 +361,64 @@ def testPruneWorktrees(tempDir, mainWindow):
 
     triggerMenuAction(rw.sidebar.makeNodeMenu(header), r"prune worktrees")
     assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 1
+
+
+def testWorktreesSectionAboveLocalBranches(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    root = rw.sidebar.findNodeByKind(SidebarItem.WorktreesHeader).parent
+    kinds = [n.kind for n in root.children]
+    assert kinds.index(SidebarItem.WorktreesHeader) < kinds.index(SidebarItem.LocalBranchesHeader)
+
+
+def testBranchMenuOpensExistingWorktreeInsteadOfNew(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+
+    # no-parent is checked out in LinkedWT -> Open in ... Worktree replaces Checkout in New Worktree
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    menu = rw.sidebar.makeNodeMenu(node)
+    with pytest.raises(KeyError):
+        findMenuAction(menu, "checkout in new worktree")
+    triggerMenuAction(menu, r"open in.+linkedwt.+worktree")
+    assert mainWindow.tabs.count() == 2
+    assert os.path.realpath(mainWindow.currentRepoWidget().workdir) == os.path.realpath(linked)
+
+    # master is NOT checked out in another worktree... it's checked out in the MAIN worktree ->
+    # also gets the Open entry (pointing at the main worktree)
+    mainWindow.tabs.setCurrentIndex(0)
+    node = rw.sidebar.findNodeByRef("refs/heads/master")
+    menu = rw.sidebar.makeNodeMenu(node)
+    with pytest.raises(KeyError):
+        findMenuAction(menu, "checkout in new worktree")
+    assert findMenuAction(menu, r"open in.+worktree") is not None
+
+
+def testBranchMenuKeepsNewWorktreeWhenNotCheckedOut(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    # no linked worktree; no-parent is not checked out anywhere
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    menu = rw.sidebar.makeNodeMenu(node)
+    assert findMenuAction(menu, "checkout in new worktree") is not None
+    with pytest.raises(KeyError):
+        findMenuAction(menu, r"open in.+worktree")
+
+
+def testRemoteBranchMenuOpensWorktreeOfMatchingLocalBranch(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    node = rw.sidebar.findNodeByRef("refs/remotes/origin/no-parent")
+    menu = rw.sidebar.makeNodeMenu(node)
+    triggerMenuAction(menu, r"open in.+linkedwt.+worktree")
+    assert os.path.realpath(mainWindow.currentRepoWidget().workdir) == os.path.realpath(linked)
+
+
+def testNewWorktreeDialogPathLabelHasBuddy(tempDir, mainWindow):
+    from gitfourchette.tasks import NewWorktree
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    NewWorktree.invoke(rw)
+    dlg = findQDialog(rw, r"new worktree")
+    assert dlg.pathLabel.buddy() is dlg.pathEdit
+    assert "&" in dlg.pathLabel.text()  # mnemonic present, consumed by buddy at render time
+    dlg.reject()

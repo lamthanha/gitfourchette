@@ -24,6 +24,8 @@ class NewWorktreeDialog(QDialog):
         localBranches = sorted(repo.branches.local)
 
         self.pathEdit = QLineEdit(self)
+        self.pathLabel = QLabel(_("&Path:"), self)
+        self.pathLabel.setBuddy(self.pathEdit)
         browseButton = QPushButton(_("&Browse…"), self)
         browseButton.clicked.connect(self.browse)
 
@@ -66,7 +68,7 @@ class NewWorktreeDialog(QDialog):
         newRow.addWidget(self.baseRefCombo)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(_("&Path:"), self))
+        layout.addWidget(self.pathLabel)
         layout.addLayout(pathRow)
         layout.addSpacing(8)
         layout.addWidget(self.existingRadio)
