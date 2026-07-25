@@ -277,6 +277,16 @@ def testRefFolderSidebarDisplayNames(tempDir, mainWindow):
     assert getRefFolderDisplayName("refs/heads/4/5/6") == "4/5/6"
 
 
+def _eyeClickPos(node, rect):
+    """
+    Point inside a row's eye (Hide) click zone. On starrable rows the star now
+    owns the far-right slot, so the eye sits one slot (STAR_WIDTH+PADDING) left
+    of the right edge; non-starrable hideable rows keep their eye flush right.
+    """
+    starBand = STAR_WIDTH + PADDING if node.canBeStarred() else 0
+    return QPoint(rect.right() - starBand - EYE_WIDTH // 2, rect.center().y())
+
+
 @pytest.mark.parametrize("explicit,implicit", [
     ("refs/heads/1/2A/3B", []),
     ("refs/heads/1/2A", ["refs/heads/1/2A/3A", "refs/heads/1/2A/3B"]),
@@ -304,7 +314,7 @@ def testHideNestedRefFolders(tempDir, mainWindow, explicit, implicit, method):
     elif method == "sidebarclick":
         index = sb.nodeToFilterIndex(node)
         rect = sb.visualRect(index)
-        QTest.mouseClick(sb.viewport(), Qt.MouseButton.LeftButton, pos=rect.topRight())
+        QTest.mouseClick(sb.viewport(), Qt.MouseButton.LeftButton, pos=_eyeClickPos(node, rect))
     else:
         raise NotImplementedError(f"unknown method {method}")
 
@@ -362,7 +372,7 @@ def testHideAllButThis(tempDir, mainWindow, explicit, implicit, method):
     elif method == "sidebarclick":
         index = sb.nodeToFilterIndex(node)
         rect = sb.visualRect(index)
-        QTest.mouseClick(sb.viewport(), Qt.MouseButton.MiddleButton, pos=rect.topRight())
+        QTest.mouseClick(sb.viewport(), Qt.MouseButton.MiddleButton, pos=_eyeClickPos(node, rect))
     else:
         raise NotImplementedError(f"unknown method {method}")
 
@@ -921,21 +931,32 @@ def testStarClickZoneOnBranchRows(tempDir, mainWindow):
 
     branch = rw.sidebar.findNodeByRef("refs/heads/master")
     rect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(branch))
-    eyeX = rect.right() - EYE_WIDTH // 2
-    starX = rect.right() - EYE_WIDTH - PADDING - STAR_WIDTH // 2
-    assert SidebarDelegate.getClickZone(branch, rect, eyeX) == SidebarClickZone.Hide
+    # Star owns the rightmost slot; the eye sits in the slot immediately left of it.
+    starX = rect.right() - STAR_WIDTH // 2
+    eyeX = rect.right() - STAR_WIDTH - PADDING - EYE_WIDTH // 2
     assert SidebarDelegate.getClickZone(branch, rect, starX) == SidebarClickZone.Star
+    assert SidebarDelegate.getClickZone(branch, rect, eyeX) == SidebarClickZone.Hide
     assert SidebarDelegate.getClickZone(branch, rect, rect.center().x()) == SidebarClickZone.Select
 
-    # Boundary: rightmost star-zone pixel vs leftmost hide-zone pixel
-    assert SidebarDelegate.getClickZone(branch, rect, rect.right() - EYE_WIDTH - PADDING) == SidebarClickZone.Star
-    assert SidebarDelegate.getClickZone(branch, rect, rect.right() - EYE_WIDTH - PADDING + 1) == SidebarClickZone.Hide
+    # Boundary: leftmost hide-zone pixel vs rightmost star-zone start
+    assert SidebarDelegate.getClickZone(branch, rect, rect.right() - STAR_WIDTH - PADDING) == SidebarClickZone.Hide
+    assert SidebarDelegate.getClickZone(branch, rect, rect.right() - STAR_WIDTH - PADDING + 1) == SidebarClickZone.Star
+    # Boundary: Hide vs Select (left edge of the eye band)
+    assert SidebarDelegate.getClickZone(branch, rect, rect.right() - STAR_WIDTH - EYE_WIDTH - PADDING) == SidebarClickZone.Select
+    assert SidebarDelegate.getClickZone(branch, rect, rect.right() - STAR_WIDTH - EYE_WIDTH - PADDING + 1) == SidebarClickZone.Hide
 
-    # Hideable-but-not-starrable rows: star band falls through to Select
+    # Hideable-but-not-starrable rows (e.g. a Remote): the eye stays flush right
+    # and no star band is introduced. The far-right slot is simply the remote's
+    # own (unchanged) eye zone -- never Star -- and the leftward Hide reservation
+    # that starrable rows use does not leak here.
     remote = rw.sidebar.findNode(lambda n: n.kind == SidebarItem.Remote and n.data == "origin")
     rrect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(remote))
-    rStarX = rrect.right() - EYE_WIDTH - PADDING - STAR_WIDTH // 2
-    assert SidebarDelegate.getClickZone(remote, rrect, rStarX) == SidebarClickZone.Select
+    assert SidebarDelegate.getClickZone(remote, rrect, rrect.right() - STAR_WIDTH // 2) != SidebarClickZone.Star
+    reservedX = rrect.right() - STAR_WIDTH - PADDING - EYE_WIDTH // 2
+    assert SidebarDelegate.getClickZone(remote, rrect, reservedX) == SidebarClickZone.Select
+    # Remote eye zone unchanged (rightmost EYE_WIDTH+PADDING band)
+    assert SidebarDelegate.getClickZone(remote, rrect, rrect.right() - EYE_WIDTH - PADDING) == SidebarClickZone.Select
+    assert SidebarDelegate.getClickZone(remote, rrect, rrect.right() - EYE_WIDTH - PADDING + 1) == SidebarClickZone.Hide
 
 
 def testStarButtonClickTogglesStar(tempDir, mainWindow):
@@ -944,7 +965,7 @@ def testStarButtonClickTogglesStar(tempDir, mainWindow):
 
     node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
     rect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(node))
-    starPos = QPoint(rect.right() - EYE_WIDTH - PADDING - STAR_WIDTH // 2, rect.center().y())
+    starPos = QPoint(rect.right() - STAR_WIDTH // 2, rect.center().y())
     QTest.mouseClick(rw.sidebar.viewport(), Qt.MouseButton.LeftButton, pos=starPos)
     assert "refs/heads/no-parent" in rw.sidebar.sidebarModel.repoModel.prefs.starredRefs
 
@@ -952,7 +973,7 @@ def testStarButtonClickTogglesStar(tempDir, mainWindow):
     starRoot = rw.sidebar.findNodeByKind(SidebarItem.StarredHeader)
     alias = starRoot.children[0]
     arect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(alias))
-    aliasStarPos = QPoint(arect.right() - EYE_WIDTH - PADDING - STAR_WIDTH // 2, arect.center().y())
+    aliasStarPos = QPoint(arect.right() - STAR_WIDTH // 2, arect.center().y())
     QTest.mouseClick(rw.sidebar.viewport(), Qt.MouseButton.LeftButton, pos=aliasStarPos)
     assert "refs/heads/no-parent" not in rw.sidebar.sidebarModel.repoModel.prefs.starredRefs
     assert not rw.sidebar.findNodesByKind(SidebarItem.StarredHeader)
@@ -1010,16 +1031,21 @@ def _recordPaintedIcons(rw, node, mouseOver, monkeypatch):
 
 def testStarPaintDoesNotCollideWithIndicatorsOrHideZone(tempDir, mainWindow, monkeypatch):
     """
-    Regression guard for the two whole-branch review findings that the
-    per-task reviews missed (they asserted click-zone arithmetic but never
-    painted rects):
+    Paint-level regression guard (records real painted rects via a
+    monkeypatched stockIcon). Verifies the FIXED-slot layout: on starrable
+    rows both slots are reserved whenever either band shows, so the star owns
+    the far-right slot and the eye the slot immediately left of it, and neither
+    ever moves horizontally.
 
     (a) On a starred, non-hovered row that also shows the missing-upstream
-        indicator, the star band must rest at the row's right edge and must
-        NOT paint on top of the indicator (Finding 1).
-    (b) On a hovered starred row, the flush star/eye layout must keep the
-        painted star inside its raw-frame Star click zone (bar 1px-class left
-        slack) and out of the Hide zone (Finding 2).
+        indicator, the star rests in its fixed far-right slot and does NOT
+        paint on top of the indicator.
+    (b) On a hovered starrable row, the painted star lands in the raw-frame
+        Star click zone and the painted eye in the Hide zone (bar the
+        1px-class seam slack), eye left of star.
+    (c) Stability pins: the star never moves between idle-starred and hovered
+        paints of the same row; the eye never moves between idle-hidden and
+        hovered paints.
     """
     wd = unpackRepo(tempDir)
     with RepoContext(wd) as repo:
@@ -1046,7 +1072,13 @@ def testStarPaintDoesNotCollideWithIndicatorsOrHideZone(tempDir, mainWindow, mon
     assert starRect.right() >= contentsRight - 2, \
         f"star right {starRect.right()} not at contents edge {contentsRight}"
 
-    # --- (b) hovered starred row: flush star/eye alignment ---
+    # (c) star stability: hovering the same starred row must NOT move the star
+    # (both slots stay reserved in both states).
+    _, paintedMasterHover = _recordPaintedIcons(rw, masterNode, mouseOver=True, monkeypatch=monkeypatch)
+    assert paintedMasterHover["star-filled"] == starRect, \
+        f"star moved on hover: idle {starRect} vs hover {paintedMasterHover['star-filled']}"
+
+    # --- (b) hovered starrable row: fixed star/eye slots, raw-frame zones ---
     hoverNode = rw.sidebar.findNodeByRef("refs/heads/no-parent")
     rawRectB, paintedB = _recordPaintedIcons(rw, hoverNode, mouseOver=True, monkeypatch=monkeypatch)
 
@@ -1056,16 +1088,33 @@ def testStarPaintDoesNotCollideWithIndicatorsOrHideZone(tempDir, mainWindow, mon
     assert eyeB is not None, "hovered hideable row should draw an eye button"
 
     rawRight = rawRectB.right()
-    starZoneBoundary = rawRight - EYE_WIDTH - STAR_WIDTH - PADDING  # x > this => Star zone
-    hideZoneBoundary = rawRight - EYE_WIDTH - PADDING               # x > this => Hide zone
+    # NEW zones: Star owns the rightmost slot, Hide the slot immediately left.
+    starZoneStart = rawRight - STAR_WIDTH - PADDING              # x > this => Star
+    hideZoneStart = rawRight - STAR_WIDTH - EYE_WIDTH - PADDING  # x > this => Hide
 
-    # No painted star pixel may fall in the Hide zone.
-    assert starB.right() <= hideZoneBoundary, \
-        f"star {starB} bleeds into Hide zone (> {hideZoneBoundary})"
-    # Every star pixel lies in the Star zone except at most the single leftmost
-    # column (the 1px-class Select slack the eye has always had too).
-    assert starB.left() >= starZoneBoundary, \
-        f"star {starB} left {starB.left()} spills past Star-zone start {starZoneBoundary} into Select"
-    # The eye sits to the right of the star, and its right region is in the Hide zone.
-    assert eyeB.left() >= starB.right(), f"eye {eyeB} overlaps star {starB}"
-    assert eyeB.right() > hideZoneBoundary, f"eye {eyeB} right not inside Hide zone"
+    # Star lies in the Star zone, save at most its single leftmost column (the
+    # 1px-class seam that resolves to the neighbouring Hide zone).
+    assert starB.left() >= starZoneStart, \
+        f"star {starB} left {starB.left()} spills past Star-zone start {starZoneStart}"
+    assert starB.right() > starZoneStart, f"star {starB} right not inside Star zone"
+    # Eye lies in the Hide zone, save at most its single leftmost column, and
+    # never bleeds into the Star zone to its right.
+    assert eyeB.left() >= hideZoneStart, \
+        f"eye {eyeB} left {eyeB.left()} spills past Hide-zone start {hideZoneStart}"
+    assert eyeB.right() <= starZoneStart, \
+        f"eye {eyeB} right {eyeB.right()} bleeds into Star zone (> {starZoneStart})"
+    # Eye sits to the left of the star.
+    assert eyeB.right() < starB.left(), f"eye {eyeB} overlaps star {starB}"
+
+    # (c) eye stability: an explicitly-hidden starrable row shows its eye in the
+    # fixed slot-2 position whether or not it's hovered (the star slot to its
+    # right stays reserved in both states, so the eye never moves).
+    triggerMenuAction(rw.sidebar.makeNodeMenu(rw.sidebar.findNodeByRef("refs/heads/no-parent")), r"hide in graph")
+    hiddenNode = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    _, paintedHiddenIdle = _recordPaintedIcons(rw, hiddenNode, mouseOver=False, monkeypatch=monkeypatch)
+    _, paintedHiddenHover = _recordPaintedIcons(rw, hiddenNode, mouseOver=True, monkeypatch=monkeypatch)
+    eyeIdle = next((r for name, r in paintedHiddenIdle.items() if name.startswith("view-")), None)
+    eyeHover = next((r for name, r in paintedHiddenHover.items() if name.startswith("view-")), None)
+    assert eyeIdle is not None, "explicitly-hidden row should draw an eye when idle"
+    assert eyeHover is not None
+    assert eyeIdle == eyeHover, f"eye moved on hover: idle {eyeIdle} vs hover {eyeHover}"

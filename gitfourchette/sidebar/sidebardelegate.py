@@ -57,14 +57,19 @@ class SidebarDelegate(QStyledItemDelegate):
 
     @staticmethod
     def getClickZone(node: SidebarNode, rect: QRect, x: int):
+        # The star (persistent badge) owns the rightmost slot on starrable rows;
+        # the eye sits in the slot immediately left of it. starBand reserves
+        # that rightmost slot only on starrable rows, so non-starrable hideable
+        # rows (Remote, RefFolder) keep their eye flush right (unchanged).
+        starBand = STAR_WIDTH if node.canBeStarred() else 0
         if node.kind == SidebarItem.Spacer:
             return SidebarClickZone.Invalid
         elif node.mayHaveChildren() and node.children and x < rect.left():
             return SidebarClickZone.Expand
-        elif node.canBeHidden() and x > rect.right() - EYE_WIDTH - PADDING:
-            return SidebarClickZone.Hide
-        elif node.canBeStarred() and x > rect.right() - EYE_WIDTH - STAR_WIDTH - PADDING:
+        elif node.canBeStarred() and x > rect.right() - STAR_WIDTH - PADDING:
             return SidebarClickZone.Star
+        elif node.canBeHidden() and x > rect.right() - starBand - EYE_WIDTH - PADDING:
+            return SidebarClickZone.Hide
         else:
             return SidebarClickZone.Select
 
@@ -168,10 +173,15 @@ class SidebarDelegate(QStyledItemDelegate):
 
         # Prepare text
         textRect = QRect(option.rect)
-        if makeRoomForEye:
+        if node.canBeStarred():
+            # FIXED SLOTS: on starrable rows, reserve BOTH the eye and star slots
+            # as soon as EITHER band shows. Only one icon may actually be painted,
+            # but keeping both slots reserved pins the star to the far-right slot
+            # and the eye to the slot left of it, so neither moves on hover.
+            if makeRoomForEye or makeRoomForStar:
+                textRect.adjust(0, 0, -(EYE_WIDTH + STAR_WIDTH), 0)
+        elif makeRoomForEye:
             textRect.adjust(0, 0, -EYE_WIDTH, 0)
-        if makeRoomForStar:
-            textRect.adjust(0, 0, -STAR_WIDTH, 0)
 
         # Anchor the star/eye button bands to the row's right edge NOW, before
         # the indicator blocks below clip textRect leftward. The bands must
@@ -243,21 +253,15 @@ class SidebarDelegate(QStyledItemDelegate):
             text = painter.fontMetrics().elidedText(fullText, Qt.TextElideMode.ElideMiddle, textRect.width())
             painter.drawText(textRect, option.displayAlignment, text)
 
-        # Draw star/eye buttons: flush bands filling right-to-left from the
-        # row's right edge (bandAnchor, captured before indicator clipping),
-        # star left of eye; each collapses when unused. This flush layout is
-        # what aligns the painted icons with the raw-frame click zones.
-        bandLeft = bandAnchor
-        if makeRoomForStar:
-            r = QRect(option.rect)
-            r.setLeft(bandLeft)
-            r.setWidth(STAR_WIDTH)
-            starIcon = stockIcon("star-filled" if isStarred else "star-outline")
-            starIcon.paint(painter, r, mode=iconMode)
-            bandLeft += STAR_WIDTH
+        # Draw star/eye buttons in FIXED slots (bandAnchor was captured before
+        # indicator clipping). On starrable rows both slots are reserved
+        # together (see textRect above): the eye occupies bandAnchor and the
+        # star the slot immediately right of it (the row's far-right slot), so
+        # each is painted only when relevant yet neither moves horizontally.
+        # Non-starrable hideable rows paint a single eye flush right at bandAnchor.
         if makeRoomForEye:
             r = QRect(option.rect)
-            r.setLeft(bandLeft)
+            r.setLeft(bandAnchor)
             r.setWidth(EYE_WIDTH)
             if isExplicitlyShown or mouseOver and isHideAllButThisMode:
                 eyeIconName = "view-exclusive"
@@ -269,5 +273,11 @@ class SidebarDelegate(QStyledItemDelegate):
                 eyeIconName = "view-visible"
             unpluggedIcon = stockIcon(eyeIconName)
             unpluggedIcon.paint(painter, r, mode=iconMode)
+        if makeRoomForStar:
+            r = QRect(option.rect)
+            r.setLeft(bandAnchor + EYE_WIDTH)
+            r.setWidth(STAR_WIDTH)
+            starIcon = stockIcon("star-filled" if isStarred else "star-outline")
+            starIcon.paint(painter, r, mode=iconMode)
 
         painter.restore()

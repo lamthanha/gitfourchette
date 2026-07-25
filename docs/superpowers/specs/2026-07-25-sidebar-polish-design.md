@@ -77,3 +77,18 @@ Extend `testStarBranch` (or a sibling test): after starring the checked-out bran
 - Star column/section reordering, star-count badges.
 - Migrating stars on branch rename (still prunes per previous spec).
 - Any change to the "(N)" collapsed-count suffix.
+
+## Amendment (2026-07-25): star band rightmost, fixed slots
+
+User-requested follow-up after smoke-testing Feature 1. The original design (star band left of the eye; each band collapsing to zero width when unused) made the persistent filled star **slide one slot left** when the eye appeared on hover. The user wants the star badge to stay put. Superseding decision: **the star owns the stable far-right slot; the eye sits in the slot immediately left of it; icons appear/disappear but never move horizontally.**
+
+**New click zones (`getClickZone`, raw `visualRect` frame).** Order is Spacer → Expand → Star → Hide → Select (star now wins the far right, so it is checked before Hide). With `starBand = STAR_WIDTH if node.canBeStarred() else 0`:
+- Starrable rows (LocalBranch, RemoteBranch): Star = `x > rect.right() - STAR_WIDTH - PADDING` (rightmost); Hide = `x > rect.right() - STAR_WIDTH - EYE_WIDTH - PADDING` (second band).
+- Hideable-but-not-starrable rows (Remote, RefFolder): **unchanged** — no star band (`starBand = 0`), Hide = `x > rect.right() - EYE_WIDTH - PADDING`, eye flush right.
+
+**New paint geometry — FIXED SLOTS.** On starrable rows, whenever **either** band is visible (`makeRoomForEye or makeRoomForStar`), reserve **both** slots (shrink `textRect` by `EYE_WIDTH + STAR_WIDTH`), even if only one icon is drawn. Icons draw into their fixed slots off `bandAnchor` (still captured before the indicator blocks clip `textRect`): eye at `bandAnchor` (`EYE_WIDTH` wide), star at `bandAnchor + EYE_WIDTH` (the far-right `STAR_WIDTH`). Eye still draws only when `makeRoomForEye`; star only when `makeRoomForStar`; the eye icon-choice chain is byte-identical to Feature 1. Non-starrable hideable rows keep the single eye slot flush right.
+
+**Consequences (accepted; empirically pinned in `testStarPaintDoesNotCollideWithIndicatorsOrHideZone`):**
+- A starred idle row and the same row hovered paint the star at the **pixel-identical** far-right position; likewise a hidden idle row and hovered row paint the eye at the pixel-identical slot-2 position. Nothing moves on hover.
+- A hidden-but-unstarred idle row shows a "floating" eye with an empty star slot to its right (accepted look).
+- Clicking the far-right slot on a starrable row now toggles the **star**, not hide; the hide-by-click tests target the eye's slot-2 position accordingly (`_eyeClickPos` helper).
