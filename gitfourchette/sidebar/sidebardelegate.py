@@ -172,6 +172,9 @@ class SidebarDelegate(QStyledItemDelegate):
             textRect.adjust(0, 0, -EYE_WIDTH, 0)
         if makeRoomForStar:
             textRect.adjust(0, 0, -STAR_WIDTH, 0)
+            if makeRoomForEye:
+                # Keep the painted star clear of the eye's click band
+                textRect.adjust(0, 0, -PADDING, 0)
 
         font: QFont = index.data(Qt.ItemDataRole.FontRole) or option.font
         baseFontSize = font.pointSizeF()
@@ -244,6 +247,8 @@ class SidebarDelegate(QStyledItemDelegate):
             starIcon = stockIcon("star-filled" if isStarred else "star-outline")
             starIcon.paint(painter, r, mode=iconMode)
             bandLeft += STAR_WIDTH
+            if makeRoomForEye:
+                bandLeft += PADDING
         if makeRoomForEye:
             r = QRect(option.rect)
             r.setLeft(bandLeft)

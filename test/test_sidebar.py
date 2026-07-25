@@ -919,6 +919,10 @@ def testStarClickZoneOnBranchRows(tempDir, mainWindow):
     assert SidebarDelegate.getClickZone(branch, rect, starX) == SidebarClickZone.Star
     assert SidebarDelegate.getClickZone(branch, rect, rect.center().x()) == SidebarClickZone.Select
 
+    # Boundary: rightmost star-zone pixel vs leftmost hide-zone pixel
+    assert SidebarDelegate.getClickZone(branch, rect, rect.right() - EYE_WIDTH - PADDING) == SidebarClickZone.Star
+    assert SidebarDelegate.getClickZone(branch, rect, rect.right() - EYE_WIDTH - PADDING + 1) == SidebarClickZone.Hide
+
     # Hideable-but-not-starrable rows: star band falls through to Select
     remote = rw.sidebar.findNode(lambda n: n.kind == SidebarItem.Remote and n.data == "origin")
     rrect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(remote))
