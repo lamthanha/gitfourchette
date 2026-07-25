@@ -236,6 +236,20 @@ def testBogusBindingValueChecksNoColor(tempDir, mainWindow):
     assert _tabIconKey(mainWindow, 0) is None
 
 
+def testRepositoryMenuStaysUsableWhileOverridden(tempDir, mainWindow):
+    _wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    menu = mainWindow.generateTabContextMenu(1)
+    triggerMenuAction(menu, "tab color: this worktree/^red$")
+    assert _tabIconKey(mainWindow, 1) == _dotKey("red")
+
+    # With the override live on this tab, repository-scope actions must stay
+    # enabled and keep governing the other worktrees' tabs.
+    menu = mainWindow.generateTabContextMenu(1)
+    triggerMenuAction(menu, "tab color: repository/^green$")
+    assert _tabIconKey(mainWindow, 0) == _dotKey("green")   # sibling follows the binding
+    assert _tabIconKey(mainWindow, 1) == _dotKey("red")     # this tab keeps its override
+
+
 def testOrphanOverrideKeepsWorktreeMenuOnSingleWorktreeRepo(tempDir, mainWindow):
     from gitfourchette import settings
     wd = unpackRepo(tempDir)
