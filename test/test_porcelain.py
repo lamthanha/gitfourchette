@@ -130,3 +130,33 @@ def testInGitdirWithSymlinkedRepo(tempDir):
         # Must not raise ValueError("Won't resolve absolute path outside gitdir")
         config_path = repo.in_gitdir("config", common=True)
     assert config_path.endswith("config")
+
+
+def testFastForwardBranchCheckedOutInOtherWorktreeDoesNotTouchWorkdir(tempDir):
+    """
+    Branch.is_checked_out() is worktree-wide, so fast_forward_branch() used to
+    checkout_tree() into THIS worktree when the target branch was merely
+    checked out in ANOTHER worktree, spilling the pulled tree into the workdir.
+    """
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        repo.checkout_local_branch("no-parent")
+        repo.create_branch_on_head("wtbranch")
+        repo.add_worktree("LinkedWT", str(Path(tempDir.name) / "LinkedWT"),
+                          repo.branches.local["wtbranch"])
+
+    with RepoContext(wd) as repo:
+        repo.fast_forward_branch("wtbranch", "refs/remotes/origin/master")
+        assert repo.branches["wtbranch"].target == repo.branches["origin/master"].target
+        assert repo.head_branch_shorthand == "no-parent"
+    assert not (Path(wd) / "a" / "a1").exists()
+
+
+def testFastForwardBranchOnCurrentBranchUpdatesWorkdir(tempDir):
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        repo.checkout_local_branch("no-parent")
+        repo.fast_forward_branch("no-parent", "refs/remotes/origin/master")
+        assert repo.branches["no-parent"].target == repo.branches["origin/master"].target
+        assert repo.head_commit_id == repo.branches["origin/master"].target
+    assert (Path(wd) / "a" / "a1").exists()
