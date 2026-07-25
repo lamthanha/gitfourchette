@@ -5,7 +5,6 @@
 # -----------------------------------------------------------------------------
 
 import logging
-import os
 from contextlib import suppress
 
 from gitfourchette.forms.newbranchdialog import NewBranchDialog
@@ -18,6 +17,7 @@ from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.tasks.repotask import AbortTask, RepoTask, TaskPrereqs, TaskEffects
 from gitfourchette.toolbox import *
+from gitfourchette.worktrees import worktreeName
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +44,15 @@ class SwitchBranch(RepoTask):
                 (wt for wt in self.repoModel.worktrees if wt.branch == RefPrefix.HEADS + newBranch), None)
 
             if holdingWorktree is None:
-                # Stale/edge case (e.g. worktree list out of sync): fall back
-                # to the old informational message.
+                # Belt-and-braces: is_checked_out() already agrees with
+                # `git worktree list` (both disregard dead/prunable
+                # worktrees), so this shouldn't normally happen. Fall back to
+                # the old informational message just in case.
                 message = _("Branch {0} is already checked out.", bquo(newBranch))
                 raise AbortTask(message, 'information')
 
-            worktreeName = os.path.basename(os.path.normpath(holdingWorktree.path))
-            text = (_("Branch {0} is already checked out in worktree {1}.", bquo(newBranch), bquo(worktreeName))
+            text = (_("Branch {0} is already checked out in worktree {1}.",
+                      bquo(newBranch), bquo(worktreeName(holdingWorktree)))
                     + "<br>" + _("Open that worktree?"))
             yield from self.flowConfirm(text=text, verb=_("Open"))
             self.rw.openRepo.emit(holdingWorktree.path, NavLocator())

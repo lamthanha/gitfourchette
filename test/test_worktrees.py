@@ -369,7 +369,8 @@ def testWorktreesSectionAboveLocalBranches(tempDir, mainWindow):
     rw = mainWindow.openRepo(wd)
     root = rw.sidebar.findNodeByKind(SidebarItem.WorktreesHeader).parent
     kinds = [n.kind for n in root.children]
-    assert kinds.index(SidebarItem.WorktreesHeader) < kinds.index(SidebarItem.LocalBranchesHeader)
+    # "Directly above": only the Spacer between them separates the two headers.
+    assert kinds.index(SidebarItem.LocalBranchesHeader) - kinds.index(SidebarItem.WorktreesHeader) == 2
 
 
 def testBranchMenuOpensExistingWorktreeInsteadOfNew(tempDir, mainWindow):
@@ -403,6 +404,29 @@ def testBranchMenuKeepsNewWorktreeWhenNotCheckedOut(tempDir, mainWindow):
     assert findMenuAction(menu, "checkout in new worktree") is not None
     with pytest.raises(KeyError):
         findMenuAction(menu, r"open in.+worktree")
+
+
+def testBranchMenuAndWorktreeRowIgnorePrunableWorktree(tempDir, mainWindow):
+    import shutil
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    shutil.rmtree(linked)  # stale admin entry remains, marked prunable by git
+    rw.refreshRepo()
+
+    # Branch menu: no-parent is no longer usably checked out anywhere (its only
+    # worktree's folder is gone) -> back to "checkout in new worktree", and no
+    # "open in ... worktree" entry (that would just raise FileNotFoundError).
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    menu = rw.sidebar.makeNodeMenu(node)
+    assert findMenuAction(menu, "checkout in new worktree") is not None
+    with pytest.raises(KeyError):
+        findMenuAction(menu, r"open in.+worktree")
+
+    # The stale Worktree sidebar row itself: "Open Worktree in New Tab" must
+    # be disabled since there's no folder left to open.
+    staleNode = _worktreeNodeByPath(rw, linked)
+    staleMenu = rw.sidebar.makeNodeMenu(staleNode)
+    openAction = findMenuAction(staleMenu, "open worktree in new tab")
+    assert not openAction.isEnabled()
 
 
 def testRemoteBranchMenuOpensWorktreeOfMatchingLocalBranch(tempDir, mainWindow):

@@ -20,6 +20,7 @@ from gitfourchette.repomodel import RepoModel, UC_FAKEREF
 from gitfourchette.repoprefs import RefSort
 from gitfourchette.toolbox import *
 from gitfourchette.trtables import TrTables
+from gitfourchette.worktrees import worktreeName
 
 logger = logging.getLogger(__name__)
 
@@ -548,7 +549,7 @@ class SidebarModel(QAbstractItemModel):
         # -----------------------------
         for wt in repoModel.worktrees:
             node = SidebarNode(SidebarItem.Worktree, wt.path)
-            name = os.path.basename(os.path.normpath(wt.path))
+            name = worktreeName(wt)
             if wt.isMain:
                 name = _("{0} (main)", name)
             node.displayName = name

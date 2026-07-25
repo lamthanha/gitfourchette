@@ -4,7 +4,6 @@
 # For full terms, see the included LICENSE file.
 # -----------------------------------------------------------------------------
 
-import os
 import warnings
 from collections.abc import Callable, Iterable
 from contextlib import suppress
@@ -28,6 +27,7 @@ from gitfourchette.tasks import *
 from gitfourchette.toolbox import *
 from gitfourchette.trtables import TrTables
 from gitfourchette.webhost import WebHost
+from gitfourchette.worktrees import WorktreeInfo, worktreeName
 
 INVALID_MOUSEPRESS = (-1, SidebarClickZone.Invalid)
 
@@ -566,8 +566,14 @@ class Sidebar(QTreeView):
             ]
 
         elif item == SidebarItem.Worktree:
+            # Stale/prunable worktree: its folder is gone, so opening it would
+            # just raise FileNotFoundError -- disable the entry instead.
+            thisWorktree = next((wt for wt in model.repoModel.worktrees if wt.path == data), None)
+            canOpen = thisWorktree is None or not thisWorktree.prunable
+
             actions += [
-                ActionDef(_("&Open Worktree in New Tab"), lambda: self.openWorktreeRepo.emit(data)),
+                ActionDef(_("&Open Worktree in New Tab"), lambda: self.openWorktreeRepo.emit(data),
+                          enabled=canOpen),
                 ActionDef(_("Open Worktree &Folder"), lambda: openFolder(data)),
                 ActionDef(_("Copy &Path"), lambda: self.copyToClipboard(data)),
                 ActionDef.SEPARATOR,
@@ -1085,17 +1091,21 @@ class Sidebar(QTreeView):
     # -------------------------------------------------------------------------
     # Worktree-aware branch menu helpers (Forkette extension)
 
-    def findWorktreeCheckedOutOn(self, refName: str):
+    def findWorktreeCheckedOutOn(self, refName: str) -> WorktreeInfo | None:
         """Return the WorktreeInfo checked out on refName (full refname, e.g.
         "refs/heads/foo"), or None if that branch isn't checked out anywhere.
         Don't use pygit2's Branch.is_checked_out() for this: it's worktree-wide
-        and doesn't tell us *which* worktree, which is what we need here."""
-        return next((wt for wt in self.sidebarModel.repoModel.worktrees if wt.branch == refName), None)
+        and doesn't tell us *which* worktree, which is what we need here.
+        Excludes prunable (stale/deleted-on-disk) worktrees: git still lists
+        their admin entry -- and the branch as "checked out" on it -- until
+        `worktree prune` runs, but there's no folder left to open, and
+        libgit2's is_checked_out() already disregards them."""
+        return next((wt for wt in self.sidebarModel.repoModel.worktrees
+                     if wt.branch == refName and not wt.prunable), None)
 
-    def openInWorktreeActionDef(self, wt) -> ActionDef:
-        worktreeName = os.path.basename(os.path.normpath(wt.path))
+    def openInWorktreeActionDef(self, wt: WorktreeInfo) -> ActionDef:
         return ActionDef(
-            _("Open in {0} &Worktree", lquo(worktreeName)),
+            _("Open in {0} &Worktree", lquo(worktreeName(wt))),
             lambda path=wt.path: self.openWorktreeRepo.emit(path))
 
     # -------------------------------------------------------------------------

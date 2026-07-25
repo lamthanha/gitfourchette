@@ -9,6 +9,7 @@
 # -----------------------------------------------------------------------------
 
 import dataclasses
+import os
 
 from gitfourchette.gitdriver import GitDriver
 
@@ -57,6 +58,13 @@ def parseWorktreeListPorcelain(text: str) -> list[WorktreeInfo]:
         if fields.get("path"):
             infos.append(WorktreeInfo(**fields))
     return infos
+
+
+def worktreeName(wt: WorktreeInfo) -> str:
+    """Display name for a worktree: the basename of its path.
+    Shared by the sidebar (list rows, branch-menu "Open in ... Worktree"
+    actions) and SwitchBranch's worktree-aware "already checked out" dialog."""
+    return os.path.basename(os.path.normpath(wt.path))
 
 
 def listWorktrees(workdir: str) -> list[WorktreeInfo]:
