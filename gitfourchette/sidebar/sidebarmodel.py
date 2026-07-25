@@ -56,7 +56,9 @@ def defaultCollapseCache(repoModel) -> set[str]:
     branch's upstream remote; falling back to 'origin', then the first remote)."""
     remotes = list(repoModel.remotes)
     tracked = ""
-    with suppress(KeyError, AttributeError, GitError):
+    # ValueError: pygit2 raises it from Branch.remote_name when the upstream
+    # is a local branch (branch.<name>.remote = ".").
+    with suppress(KeyError, AttributeError, ValueError, GitError):
         repo = repoModel.repo
         upstream = repo.branches.local[repo.head_branch_shorthand].upstream
         if upstream is not None:

@@ -780,6 +780,22 @@ def testSidebarCollapseDefaults(tempDir, mainWindow):
     assert _sbExpanded(rw, remotesRoot)     # remotes ROOT stays open (names visible)
 
 
+def testSidebarCollapseDefaultsWithLocalUpstream(tempDir, mainWindow):
+    # The checked-out branch may track a LOCAL branch (branch.<name>.remote=".").
+    # pygit2 raises ValueError (not GitError) on Branch.remote_name then; this
+    # must not abort opening the repo ("reference 'refs/heads/develop' is not
+    # a remote branch").
+    wd = unpackRepo(tempDir)
+    runShellScript("git branch develop master && git branch --set-upstream-to=develop master", wd)
+    rw = mainWindow.openRepo(wd)
+
+    # No tracked remote resolvable from the upstream: fall back to "origin".
+    origin = rw.sidebar.findNode(lambda n: n.kind == SidebarItem.Remote and n.data == "origin")
+    tags = rw.sidebar.findNodeByKind(SidebarItem.TagsHeader)
+    assert _sbExpanded(rw, origin)
+    assert not _sbExpanded(rw, tags)
+
+
 def testSidebarCollapseDefaultsPrimeOnlyOnce(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     makeBareCopy(wd, addAsRemote="localfs", preFetch=True)
