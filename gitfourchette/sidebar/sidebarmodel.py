@@ -123,6 +123,11 @@ class SidebarLayout:
         SidebarItem.RefFolder,
     ])
 
+    StarrableItems = sorted([
+        SidebarItem.LocalBranch,
+        SidebarItem.RemoteBranch,
+    ])
+
 
 class SidebarNode:
     children: list[SidebarNode]
@@ -180,6 +185,9 @@ class SidebarNode:
 
     def canBeHidden(self):
         return self.kind in SidebarLayout.HideableItems
+
+    def canBeStarred(self):
+        return self.kind in SidebarLayout.StarrableItems
 
     def walk(self):
         # Unit test helper. Also used by Sidebar.restoreSelectionBackup, which

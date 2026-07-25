@@ -24,6 +24,7 @@ PE_COLLAPSED = QStyle.PrimitiveElement.PE_IndicatorArrowRight
 EXPAND_TRIANGLE_WIDTH = 6
 PADDING = 4
 EYE_WIDTH = 16
+STAR_WIDTH = 16
 
 
 class SidebarClickZone(enum.IntEnum):
@@ -31,6 +32,7 @@ class SidebarClickZone(enum.IntEnum):
     Select = 1
     Expand = 2
     Hide = 3
+    Star = 4
 
 
 class SidebarDelegate(QStyledItemDelegate):
@@ -61,6 +63,8 @@ class SidebarDelegate(QStyledItemDelegate):
             return SidebarClickZone.Expand
         elif node.canBeHidden() and x > rect.right() - EYE_WIDTH - PADDING:
             return SidebarClickZone.Hide
+        elif node.canBeStarred() and x > rect.right() - EYE_WIDTH - STAR_WIDTH - PADDING:
+            return SidebarClickZone.Star
         else:
             return SidebarClickZone.Select
 
@@ -88,6 +92,12 @@ class SidebarDelegate(QStyledItemDelegate):
             isExplicitlyHidden = sidebarModel.isExplicitlyHidden(node)
             isImplicitlyHidden = isExplicitlyHidden or sidebarModel.isImplicitlyHidden(node)
             makeRoomForEye = mouseOver or isExplicitlyShown or isExplicitlyHidden or isImplicitlyHidden
+
+        isStarred = False
+        makeRoomForStar = False
+        if node.canBeStarred():
+            isStarred = node.data in sidebarModel.repoModel.prefs.starredRefs
+            makeRoomForStar = isStarred or mouseOver
 
         painter.save()
 
@@ -160,6 +170,8 @@ class SidebarDelegate(QStyledItemDelegate):
         textRect = QRect(option.rect)
         if makeRoomForEye:
             textRect.adjust(0, 0, -EYE_WIDTH, 0)
+        if makeRoomForStar:
+            textRect.adjust(0, 0, -STAR_WIDTH, 0)
 
         font: QFont = index.data(Qt.ItemDataRole.FontRole) or option.font
         baseFontSize = font.pointSizeF()
@@ -222,10 +234,19 @@ class SidebarDelegate(QStyledItemDelegate):
             text = painter.fontMetrics().elidedText(fullText, Qt.TextElideMode.ElideMiddle, textRect.width())
             painter.drawText(textRect, option.displayAlignment, text)
 
-        # Draw eye
+        # Draw star/eye buttons: bands fill right-to-left from the text edge,
+        # star left of eye; each collapses when unused.
+        bandLeft = textRect.right()
+        if makeRoomForStar:
+            r = QRect(option.rect)
+            r.setLeft(bandLeft)
+            r.setWidth(STAR_WIDTH)
+            starIcon = stockIcon("star-filled" if isStarred else "star-outline")
+            starIcon.paint(painter, r, mode=iconMode)
+            bandLeft += STAR_WIDTH
         if makeRoomForEye:
             r = QRect(option.rect)
-            r.setLeft(textRect.right())
+            r.setLeft(bandLeft)
             r.setWidth(EYE_WIDTH)
             if isExplicitlyShown or mouseOver and isHideAllButThisMode:
                 eyeIconName = "view-exclusive"

@@ -10,7 +10,7 @@ import re
 from gitfourchette.nav import NavLocator
 from gitfourchette.repomodel import UC_FAKEID
 from gitfourchette.sidebar.sidebarmodel import SidebarItem, SidebarModel
-from gitfourchette.sidebar.sidebardelegate import SidebarDelegate, SidebarClickZone
+from gitfourchette.sidebar.sidebardelegate import SidebarDelegate, SidebarClickZone, EYE_WIDTH, STAR_WIDTH, PADDING
 from gitfourchette.toolbox import naturalSort
 from .util import *
 
@@ -905,3 +905,42 @@ def testNoExpandZoneOnChildlessNodes(tempDir, mainWindow):
     QTest.mouseClick(rw.sidebar.viewport(), Qt.MouseButton.LeftButton,
                      pos=QPoint(rect.left() - 5, rect.center().y()))
     assert rw.sidebar.currentIndex() == stashesIndex
+
+
+def testStarClickZoneOnBranchRows(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    branch = rw.sidebar.findNodeByRef("refs/heads/master")
+    rect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(branch))
+    eyeX = rect.right() - EYE_WIDTH // 2
+    starX = rect.right() - EYE_WIDTH - PADDING - STAR_WIDTH // 2
+    assert SidebarDelegate.getClickZone(branch, rect, eyeX) == SidebarClickZone.Hide
+    assert SidebarDelegate.getClickZone(branch, rect, starX) == SidebarClickZone.Star
+    assert SidebarDelegate.getClickZone(branch, rect, rect.center().x()) == SidebarClickZone.Select
+
+    # Hideable-but-not-starrable rows: star band falls through to Select
+    remote = rw.sidebar.findNode(lambda n: n.kind == SidebarItem.Remote and n.data == "origin")
+    rrect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(remote))
+    rStarX = rrect.right() - EYE_WIDTH - PADDING - STAR_WIDTH // 2
+    assert SidebarDelegate.getClickZone(remote, rrect, rStarX) == SidebarClickZone.Select
+
+
+def testStarButtonClickTogglesStar(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    rect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(node))
+    starPos = QPoint(rect.right() - EYE_WIDTH - PADDING - STAR_WIDTH // 2, rect.center().y())
+    QTest.mouseClick(rw.sidebar.viewport(), Qt.MouseButton.LeftButton, pos=starPos)
+    assert "refs/heads/no-parent" in rw.sidebar.sidebarModel.repoModel.prefs.starredRefs
+
+    # The sidebar rebuilt; unstar via the alias row's own star button
+    starRoot = rw.sidebar.findNodeByKind(SidebarItem.StarredHeader)
+    alias = starRoot.children[0]
+    arect = rw.sidebar.visualRect(rw.sidebar.nodeToFilterIndex(alias))
+    aliasStarPos = QPoint(arect.right() - EYE_WIDTH - PADDING - STAR_WIDTH // 2, arect.center().y())
+    QTest.mouseClick(rw.sidebar.viewport(), Qt.MouseButton.LeftButton, pos=aliasStarPos)
+    assert "refs/heads/no-parent" not in rw.sidebar.sidebarModel.repoModel.prefs.starredRefs
+    assert not rw.sidebar.findNodesByKind(SidebarItem.StarredHeader)

@@ -871,6 +871,9 @@ class Sidebar(QTreeView):
                 else:
                     self.expand(index)
             event.accept()
+        elif zone == SidebarClickZone.Star:
+            self.wantToggleStarNode(node)
+            event.accept()
         else:
             warnings.warn(f"Unknown click zone {zone}")
 
