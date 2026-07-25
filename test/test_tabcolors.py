@@ -1,4 +1,8 @@
 # -----------------------------------------------------------------------------
+# Copyright (C) 2026 GitFourchette contributors.
+# This file is part of GitFourchette, distributed under the GNU GPL v3.
+# For full terms, see the included LICENSE file.
+# -----------------------------------------------------------------------------
 # Forkette extension tests — tab color dots with repo bindings.
 # -----------------------------------------------------------------------------
 
@@ -7,6 +11,7 @@ from types import SimpleNamespace
 
 from gitfourchette import tabcolors
 from gitfourchette.application import GFApplication
+
 from .util import *
 
 
@@ -120,7 +125,7 @@ def _openMainAndLinkedWorktree(tempDir, mainWindow):
 
 def testBindWholeRepoFromMainTab(tempDir, mainWindow):
     from gitfourchette import settings
-    wd, linked, rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
     assert _tabIconKey(mainWindow, 0) is None
     assert _tabIconKey(mainWindow, 1) is None
 
@@ -147,7 +152,7 @@ def testBindWholeRepoFromMainTab(tempDir, mainWindow):
 
 def testBindWholeRepoFromChildWorktreeTab(tempDir, mainWindow):
     from gitfourchette import settings
-    wd, linked, rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
 
     menu = mainWindow.generateTabContextMenu(1)  # child worktree's tab
     triggerMenuAction(menu, "tab color/teal")
@@ -159,7 +164,7 @@ def testBindWholeRepoFromChildWorktreeTab(tempDir, mainWindow):
 
 
 def testWorktreeOverride(tempDir, mainWindow):
-    wd, linked, rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    _wd, _linked, _rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
     menu = mainWindow.generateTabContextMenu(0)
     triggerMenuAction(menu, "tab color/orange")
 
@@ -190,7 +195,7 @@ def testWorktreeOverride(tempDir, mainWindow):
 
 def testUnloadedStubTabKeepsBindingDot(tempDir, mainWindow):
     from gitfourchette.forms.repostub import RepoStub
-    wd, linked, rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    _wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
     menu = mainWindow.generateTabContextMenu(0)
     triggerMenuAction(menu, "tab color/purple")
 
@@ -208,7 +213,7 @@ def testUnloadedStubTabKeepsBindingDot(tempDir, mainWindow):
 
 
 def testTabColorPersistenceAcrossReopen(tempDir, mainWindow):
-    wd, linked, rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    wd, linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
     menu = mainWindow.generateTabContextMenu(0)
     triggerMenuAction(menu, "tab color/orange")
     menu = mainWindow.generateTabContextMenu(1)

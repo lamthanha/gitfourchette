@@ -1,4 +1,8 @@
 # -----------------------------------------------------------------------------
+# Copyright (C) 2026 GitFourchette contributors.
+# This file is part of GitFourchette, distributed under the GNU GPL v3.
+# For full terms, see the included LICENSE file.
+# -----------------------------------------------------------------------------
 # Forkette extension — not part of upstream GitFourchette.
 # Tab color dots: global repo bindings + per-worktree overrides.
 # Resolution: override -> repo binding -> no dot.
@@ -8,8 +12,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from gitfourchette import colors
-from gitfourchette import settings
+from gitfourchette import colors, settings
 from gitfourchette.localization import *
 from gitfourchette.qt import *
 from gitfourchette.toolbox import stockIcon
