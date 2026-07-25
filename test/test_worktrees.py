@@ -422,3 +422,27 @@ def testNewWorktreeDialogPathLabelHasBuddy(tempDir, mainWindow):
     assert dlg.pathLabel.buddy() is dlg.pathEdit
     assert "&" in dlg.pathLabel.text()  # mnemonic present, consumed by buddy at render time
     dlg.reject()
+
+
+def testSwitchToBranchCheckedOutElsewhereOffersOpen(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    menu = rw.sidebar.makeNodeMenu(node)
+    triggerMenuAction(menu, "switch to")
+    acceptQMessageBox(rw, r"already checked out in.+linkedwt.+open")
+
+    assert mainWindow.tabs.count() == 2
+    assert os.path.realpath(mainWindow.currentRepoWidget().workdir) == os.path.realpath(linked)
+
+
+def testSwitchToBranchCheckedOutElsewhereDeclineDoesNothing(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    menu = rw.sidebar.makeNodeMenu(node)
+    triggerMenuAction(menu, "switch to")
+    rejectQMessageBox(rw, r"already checked out in.+linkedwt.+open")
+
+    assert mainWindow.tabs.count() == 1
+    assert rw.repo.head_branch_shorthand == "master"

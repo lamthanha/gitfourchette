@@ -5,6 +5,7 @@
 # -----------------------------------------------------------------------------
 
 import logging
+import os
 from contextlib import suppress
 
 from gitfourchette.forms.newbranchdialog import NewBranchDialog
@@ -36,8 +37,24 @@ class SwitchBranch(RepoTask):
         branchObj: Branch = self.repo.branches.local[newBranch]
 
         if branchObj.is_checked_out():
-            message = _("Branch {0} is already checked out.", bquo(newBranch))
-            raise AbortTask(message, 'information')
+            # is_checked_out() is worktree-wide, so it doesn't tell us *which*
+            # worktree holds the branch -- look it up so we can offer to open
+            # it directly instead of just refusing the switch.
+            holdingWorktree = next(
+                (wt for wt in self.repoModel.worktrees if wt.branch == RefPrefix.HEADS + newBranch), None)
+
+            if holdingWorktree is None:
+                # Stale/edge case (e.g. worktree list out of sync): fall back
+                # to the old informational message.
+                message = _("Branch {0} is already checked out.", bquo(newBranch))
+                raise AbortTask(message, 'information')
+
+            worktreeName = os.path.basename(os.path.normpath(holdingWorktree.path))
+            text = (_("Branch {0} is already checked out in worktree {1}.", bquo(newBranch), bquo(worktreeName))
+                    + "<br>" + _("Open that worktree?"))
+            yield from self.flowConfirm(text=text, verb=_("Open"))
+            self.rw.openRepo.emit(holdingWorktree.path, NavLocator())
+            return
 
         if askForConfirmation:
             text = _("Do you want to switch to branch {0}?", bquo(newBranch))
