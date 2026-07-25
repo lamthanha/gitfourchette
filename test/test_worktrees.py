@@ -8,6 +8,8 @@
 
 import os
 
+import pytest
+
 from gitfourchette import worktrees
 from .util import *
 
@@ -255,6 +257,31 @@ def testNewWorktreeGitFailureSurfaced(tempDir, mainWindow):
     dlg.accept()
     acceptQMessageBox(rw, r"already used by worktree|already checked out")
     assert not os.path.isdir(target)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores permissions")
+def testNewWorktreePathPermissionErrorHandled(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    unreadableDir = os.path.join(tempDir.name, "Unreadable")
+    os.mkdir(unreadableDir)
+    os.chmod(unreadableDir, 0)
+    try:
+        from gitfourchette.tasks import NewWorktree
+        NewWorktree.invoke(rw)
+        dlg = findQDialog(rw, r"new worktree")
+        # Point straight at the unreadable directory: listing it (Path.iterdir)
+        # raises PermissionError uncaught -- this must be caught, not escape
+        # into the global excepthook crash dialog. (Path.is_file()/is_dir() on
+        # a nonexistent child path won't reproduce this on newer Pythons, since
+        # they delegate to os.path.isfile/isdir, which already swallow OSError.)
+        dlg.setPath(unreadableDir)
+        assert not dlg.okButton.isEnabled()
+        dlg.reject()  # cancel the task so it doesn't dangle at teardown
+    finally:
+        # Restore permissions so the tempdir fixture can clean up afterwards.
+        os.chmod(unreadableDir, 0o755)
 
 
 def _worktreeNodeByPath(rw, path):

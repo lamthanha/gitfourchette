@@ -73,10 +73,12 @@ class RemoveWorktree(RepoTask):
         driver = yield from self.flowCallGit("worktree", "remove", path, autoFail=False)
         if driver.exitCode() != 0:
             yield from self.flowConfirm(
-                text=_("Git refused to remove this worktree "
-                       "(it may contain uncommitted changes).")
-                     + driver.htmlErrorText()
-                     + _("Force-remove it?"),
+                text=paragraphs(
+                    _("Git refused to remove this worktree "
+                      "(it may contain uncommitted changes, or it may be locked)."),
+                    driver.htmlErrorText(),
+                    _("Force-remove it?"),
+                ),
                 verb=_("Force Remove"))
             driver = yield from self.flowCallGit("worktree", "remove", "--force", path, autoFail=False)
             if driver.exitCode() != 0:

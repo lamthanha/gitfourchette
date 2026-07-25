@@ -102,12 +102,18 @@ class NewWorktreeDialog(QDialog):
         p = self.pathEdit.text().strip()
         if not p:
             error = _("Enter a path for the new worktree.")
-        elif Path(p).is_file():
-            error = _("There’s already a file at this path.")
-        elif Path(p).is_dir() and any(Path(p).iterdir()):
-            error = _("This directory exists and is not empty.")
-        elif self.wantNewBranch() and not self.newNameEdit.text().strip():
+        else:
+            try:
+                if Path(p).is_file():
+                    error = _("There’s already a file at this path.")
+                elif Path(p).is_dir() and any(Path(p).iterdir()):
+                    error = _("This directory exists and is not empty.")
+            except OSError:
+                error = _("This path can’t be checked.")
+        if not error and self.wantNewBranch() and not self.newNameEdit.text().strip():
             error = _("Enter a name for the new branch.")
+        if not error and not self.wantNewBranch() and not self.existingCombo.currentText():
+            error = _("There’s no local branch to check out.")
         self.errorLabel.setText(error)
         self.okButton.setEnabled(not error)
 

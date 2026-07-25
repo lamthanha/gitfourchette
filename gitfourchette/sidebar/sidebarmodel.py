@@ -555,7 +555,7 @@ class SidebarModel(QAbstractItemModel):
             if wt.prunable:
                 node.warning = _("This worktree can be pruned.")
             elif wt.locked:
-                node.warning = _("Worktree is locked.") if not wt.lockedReason else _("Worktree is locked: {0}", wt.lockedReason)
+                node.warning = _("Worktree is locked.") if not wt.lockedReason else _("Worktree is locked: {0}", escape(wt.lockedReason))
             worktreeRoot.appendChild(node)
 
         # -----------------------------

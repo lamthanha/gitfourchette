@@ -227,6 +227,7 @@ class TaskBook:
             tasks.JumpForward,
             tasks.JumpToHEAD,
             tasks.JumpToUncommittedChanges,
+            tasks.PruneWorktrees,
             tasks.UnstageModeChanges,
             tasks.UpdateSubmodule,
             tasks.UpdateSubmodulesRecursive,

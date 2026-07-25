@@ -16,6 +16,7 @@ _filterableItems = {
     SidebarItem.Remote,
     SidebarItem.RefFolder,
     SidebarItem.Submodule,
+    SidebarItem.Worktree,
     SidebarItem.DetachedHead,
     SidebarItem.UnbornHead,
 }
