@@ -84,7 +84,8 @@ def repoHasLinkedWorktrees(workdir: str) -> bool:
     """True if the repo containing this worktree has any linked worktrees."""
     worktreesDir = os.path.join(_commonGitDir(workdir), "worktrees")
     try:
-        return any(os.scandir(worktreesDir))
+        with os.scandir(worktreesDir) as it:
+            return any(it)
     except OSError:
         return False
 
@@ -105,6 +106,7 @@ def resolveTabColorName(workdir: str, repoPrefs=None) -> str:
         repoPrefs.setDirty()
         settings.prefs.setDirty()
         settings.prefs.write()
+        repoPrefs.write()
 
     color, _provenance = _effectiveStatus(workdir)
     return color
@@ -223,7 +225,7 @@ def makeTabColorMenus(
 
     noColor = repoMenu.addAction(_("&No Color"))
     noColor.setCheckable(True)
-    noColor.setChecked(not currentBinding)
+    noColor.setChecked(currentBinding not in TAB_PALETTE)
     noColor.triggered.connect(lambda: setBinding(""))
 
     repoMenu.addSeparator()

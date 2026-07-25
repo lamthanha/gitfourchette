@@ -226,6 +226,16 @@ def testStatusRowShowsEffectiveColorAndProvenance(tempDir, mainWindow):
     assert findMenuAction(menu, "tab color: repository/no color — set for this worktree") is not None
 
 
+def testBogusBindingValueChecksNoColor(tempDir, mainWindow):
+    from gitfourchette import settings
+    wd = unpackRepo(tempDir)
+    mainWindow.openRepo(wd)
+    settings.prefs.tabColorBindings[tabcolors.repoBindingKey(wd)] = "bogus"
+    menu = mainWindow.generateTabContextMenu(0)
+    assert findMenuAction(menu, "tab color/^no color$").isChecked()
+    assert _tabIconKey(mainWindow, 0) is None
+
+
 def testOrphanOverrideKeepsWorktreeMenuOnSingleWorktreeRepo(tempDir, mainWindow):
     from gitfourchette import settings
     wd = unpackRepo(tempDir)
