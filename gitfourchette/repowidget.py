@@ -186,6 +186,7 @@ class RepoWidget(QWidget):
         self.sidebar.toggleHideRefPattern.connect(self.toggleHideRefPattern)
         self.sidebar.openSubmoduleRepo.connect(self.openSubmoduleRepo)
         self.sidebar.openSubmoduleFolder.connect(self.openSubmoduleFolder)
+        self.sidebar.openWorktreeRepo.connect(self.openWorktreeRepo)
 
         self.nameChange.connect(self.refreshWindowTitle)
         self.nameChange.connect(self.sidebar.sidebarModel.refreshRepoName)
@@ -440,6 +441,9 @@ class RepoWidget(QWidget):
     def openSubmoduleFolder(self, submoduleKey: str):
         path = self.repo.get_submodule_workdir(submoduleKey)
         openFolder(path)
+
+    def openWorktreeRepo(self, path: str):
+        self.openRepo.emit(path, NavLocator())
 
     def openRepoFolder(self):
         openFolder(self.workdir)

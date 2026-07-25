@@ -35,6 +35,7 @@ class Sidebar(QTreeView):
     toggleHideRefPattern = Signal(str, bool)
     openSubmoduleRepo = Signal(str)
     openSubmoduleFolder = Signal(str)
+    openWorktreeRepo = Signal(str)
     statusMessage = Signal(str)
 
     sidebarModel: SidebarModel
@@ -544,6 +545,16 @@ class Sidebar(QTreeView):
                 TaskBook.action(self, RemoveSubmodule, taskArgs=data),
             ]
 
+        elif item == SidebarItem.WorktreesHeader:
+            actions += []  # populated by NewWorktree/PruneWorktrees in Tasks 3-4
+
+        elif item == SidebarItem.Worktree:
+            actions += [
+                ActionDef(_("&Open Worktree in New Tab"), lambda: self.openWorktreeRepo.emit(data)),
+                ActionDef(_("Open Worktree &Folder"), lambda: openFolder(data)),
+                ActionDef(_("Copy &Path"), lambda: self.copyToClipboard(data)),
+            ]
+
         # --------------------
 
         if not actions:
@@ -657,6 +668,9 @@ class Sidebar(QTreeView):
 
         elif item == SidebarItem.Submodule:
             self.openSubmoduleRepo.emit(node.data)
+
+        elif item == SidebarItem.Worktree:
+            self.openWorktreeRepo.emit(node.data)
 
         elif item == SidebarItem.StashesHeader:
             NewStash.invoke(self)

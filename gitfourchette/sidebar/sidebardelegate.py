@@ -246,7 +246,9 @@ class SidebarDelegate(QStyledItemDelegate):
         # keeps ordinal comparisons like this one -- <= SubmodulesHeader --
         # stable across merges). That's why it falls outside the
         # <= SubmodulesHeader range and needs to be called out explicitly here.
-        isCannedString = node.kind <= SidebarItem.SubmodulesHeader or node.kind == SidebarItem.StarredHeader
+        isCannedString = (node.kind <= SidebarItem.SubmodulesHeader
+                          or node.kind == SidebarItem.StarredHeader
+                          or node.kind == SidebarItem.WorktreesHeader)
         if not isCannedString:
             FittedText.draw(painter, textRect, option.displayAlignment, fullText, option.textElideMode)
         else:

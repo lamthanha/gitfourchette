@@ -205,6 +205,8 @@ class TrTables:
                 SidebarItem.Tag                 : _p("SidebarModel", "Tag"),
                 SidebarItem.Submodule           : _p("SidebarModel", "Submodules"),
                 SidebarItem.StarredHeader       : _p("SidebarModel", "Starred"),
+                SidebarItem.WorktreesHeader     : _p("SidebarModel", "Worktrees"),
+                SidebarItem.Worktree            : _p("SidebarModel", "Worktrees"),
                 SidebarItem.Spacer              : "---",
             },
 

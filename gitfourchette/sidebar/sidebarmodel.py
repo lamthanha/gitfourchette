@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Iterable
 from contextlib import suppress
 from typing import Any
@@ -48,6 +49,8 @@ class SidebarItem(enum.IntEnum):
     Submodule = enum.auto()
     RefFolder = enum.auto()
     StarredHeader = enum.auto()
+    WorktreesHeader = enum.auto()
+    Worktree = enum.auto()
 
 
 def defaultCollapseCache(repoModel) -> set[str]:
@@ -87,6 +90,8 @@ class SidebarLayout:
         SidebarItem.StashesHeader,
         SidebarItem.Spacer,
         SidebarItem.SubmodulesHeader,
+        SidebarItem.Spacer,
+        SidebarItem.WorktreesHeader,
     ]
 
     ForceExpand = [
@@ -104,6 +109,7 @@ class SidebarLayout:
         SidebarItem.SubmodulesHeader,
         SidebarItem.TagsHeader,
         SidebarItem.StarredHeader,
+        SidebarItem.WorktreesHeader,
     ])
 
     UnindentItems = {
@@ -116,6 +122,7 @@ class SidebarLayout:
         SidebarItem.Remote: -1,
         SidebarItem.RemoteBranch: -1,
         SidebarItem.RefFolder: -1,
+        SidebarItem.Worktree: -1,
     }
 
     HideableItems = sorted([
@@ -405,6 +412,7 @@ class SidebarModel(QAbstractItemModel):
         tagRoot = rootNode.findChild(SidebarItem.TagsHeader)
         submoduleRoot = rootNode.findChild(SidebarItem.SubmodulesHeader)
         stashRoot = rootNode.findChild(SidebarItem.StashesHeader)
+        worktreeRoot = rootNode.findChild(SidebarItem.WorktreesHeader)
 
         self.rootNode = rootNode
         self.nodesByRef[UC_FAKEREF] = uncommittedNode
@@ -534,6 +542,21 @@ class SidebarModel(QAbstractItemModel):
 
             if submoduleKey not in repoModel.initializedSubmodules:
                 node.warning = _("Submodule not initialized.")
+
+        # -----------------------------
+        # Worktrees
+        # -----------------------------
+        for wt in repoModel.worktrees:
+            node = SidebarNode(SidebarItem.Worktree, wt.path)
+            name = os.path.basename(os.path.normpath(wt.path))
+            if wt.isMain:
+                name = _("{0} (main)", name)
+            node.displayName = name
+            if wt.prunable:
+                node.warning = _("This worktree can be pruned.")
+            elif wt.locked:
+                node.warning = _("Worktree is locked.") if not wt.lockedReason else _("Worktree is locked: {0}", wt.lockedReason)
+            worktreeRoot.appendChild(node)
 
         # -----------------------------
         # Commit new model
@@ -856,6 +879,29 @@ class SidebarModel(QAbstractItemModel):
                 return text
             elif iconKeyRole:
                 return "achtung" if node.warning else "git-submodule"
+
+        elif item == SidebarItem.Worktree:
+            wt = next((w for w in self.repoModel.worktrees if w.path == node.data), None)
+            if displayRole:
+                return node.displayName
+            elif toolTipRole:
+                lines = [escape(node.data)]
+                if wt is not None and wt.branch:
+                    lines.append(escape(RefPrefix.split(wt.branch)[1]))
+                elif wt is not None and wt.isDetached:
+                    lines.append(escape(_("Detached HEAD @ {0}", wt.head[:12])))
+                if node.warning:
+                    lines.append(node.warning)
+                text = "<p>" + "<br>".join(lines) + "</p>"
+                self.cacheToolTip(index, text)
+                return text
+            elif iconKeyRole:
+                return "achtung" if node.warning else "SP_DirIcon"
+            elif fontRole:
+                if os.path.realpath(node.data) == os.path.realpath(self.repo.workdir):
+                    font = QFont(self._parentWidget.font())
+                    font.setBold(True)
+                    return font
 
         elif item == SidebarItem.UncommittedChanges:
             if displayRole:

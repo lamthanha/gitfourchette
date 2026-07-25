@@ -105,3 +105,76 @@ def testSyncWorktreesDetectsChanges(tempDir, mainWindow):
     assert model.syncWorktrees()      # change detected
     assert len(model.worktrees) == 2
     assert not model.syncWorktrees()  # stable again
+
+
+def _openRepoWithLinkedWorktree(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
+    rw = mainWindow.openRepo(wd)
+    return wd, linked, rw
+
+
+def testWorktreesSidebarSection(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+
+    header = rw.sidebar.findNodeByKind(SidebarItem.WorktreesHeader)
+    nodes = rw.sidebar.findNodesByKind(SidebarItem.Worktree)
+    assert len(nodes) == 2
+    assert nodes[0].parent is header
+
+    mainNode, linkedNode = nodes
+    assert os.path.realpath(mainNode.data) == os.path.realpath(wd)
+    assert "(main)" in mainNode.displayName
+    assert os.path.realpath(linkedNode.data) == os.path.realpath(linked)
+    assert "(main)" not in linkedNode.displayName
+    assert linkedNode.displayName.startswith("LinkedWT")
+
+
+def testWorktreesSectionAlwaysVisibleEvenWithoutLinked(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    header = rw.sidebar.findNodeByKind(SidebarItem.WorktreesHeader)
+    assert len(header.children) == 1  # just the main worktree row
+
+
+def testWorktreesListedFromLinkedWorktreeTab(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd = unpackRepo(tempDir)
+    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
+    rw = mainWindow.openRepo(linked)
+    nodes = rw.sidebar.findNodesByKind(SidebarItem.Worktree)
+    assert len(nodes) == 2
+    assert "(main)" in nodes[0].displayName
+
+
+def testOpenWorktreeInNewTab(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    assert mainWindow.tabs.count() == 1
+
+    linkedNode = rw.sidebar.findNode(
+        lambda n: n.kind == SidebarItem.Worktree and os.path.realpath(n.data) == os.path.realpath(linked))
+    triggerMenuAction(rw.sidebar.makeNodeMenu(linkedNode), r"open worktree in new tab")
+    assert mainWindow.tabs.count() == 2
+    assert os.path.realpath(mainWindow.currentRepoWidget().workdir) == os.path.realpath(linked)
+
+    # Double-click (wantEnterNode) opens/focuses too — no duplicate tab
+    mainWindow.tabs.setCurrentIndex(0)
+    rw.sidebar.wantEnterNode(linkedNode)
+    assert mainWindow.tabs.count() == 2
+    assert os.path.realpath(mainWindow.currentRepoWidget().workdir) == os.path.realpath(linked)
+
+
+def testWorktreeSidebarRefreshAfterExternalChange(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 1
+
+    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    rw.refreshRepo()  # autoRefresh path picks up external changes
+    assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 2
