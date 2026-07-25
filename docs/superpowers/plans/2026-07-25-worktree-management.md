@@ -145,7 +145,7 @@ def testListWorktreesRealRepo(tempDir, mainWindow):
     assert infos[0].isMain
     assert os.path.realpath(infos[0].path) == os.path.realpath(wd)
 
-    runShellScript("git worktree add ../LinkedWT master", wd)
+    runShellScript("git worktree add ../LinkedWT no-parent", wd)
     infos = worktrees.listWorktrees(wd)
     assert len(infos) == 2
     assert infos[1].branch == "refs/heads/master"
@@ -164,7 +164,7 @@ def testSyncWorktreesDetectsChanges(tempDir, mainWindow):
     assert len(model.worktrees) == 1  # primed at load
     assert not model.syncWorktrees()  # no change
 
-    runShellScript("git worktree add ../LinkedWT master", wd)
+    runShellScript("git worktree add ../LinkedWT no-parent", wd)
     assert model.syncWorktrees()      # change detected
     assert len(model.worktrees) == 2
     assert not model.syncWorktrees()  # stable again
@@ -313,7 +313,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```python
 def _openRepoWithLinkedWorktree(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript("git worktree add ../LinkedWT master", wd)
+    runShellScript("git worktree add ../LinkedWT no-parent", wd)
     linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
     rw = mainWindow.openRepo(wd)
     return wd, linked, rw
@@ -347,7 +347,7 @@ def testWorktreesSectionAlwaysVisibleEvenWithoutLinked(tempDir, mainWindow):
 def testWorktreesListedFromLinkedWorktreeTab(tempDir, mainWindow):
     from gitfourchette.sidebar.sidebarmodel import SidebarItem
     wd = unpackRepo(tempDir)
-    runShellScript("git worktree add ../LinkedWT master", wd)
+    runShellScript("git worktree add ../LinkedWT no-parent", wd)
     linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
     rw = mainWindow.openRepo(linked)
     nodes = rw.sidebar.findNodesByKind(SidebarItem.Worktree)
@@ -379,7 +379,7 @@ def testWorktreeSidebarRefreshAfterExternalChange(tempDir, mainWindow):
     rw = mainWindow.openRepo(wd)
     assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 1
 
-    runShellScript("git worktree add ../LinkedWT master", wd)
+    runShellScript("git worktree add ../LinkedWT no-parent", wd)
     rw.refreshRepo()  # autoRefresh path picks up external changes
     assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 2
 ```
