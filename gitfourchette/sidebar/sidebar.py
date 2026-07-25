@@ -232,7 +232,14 @@ class Sidebar(QTreeView):
                     UserCommand.Token.HeadUpstream
                 ])
 
+            # A branch held by another worktree can't be switched to from here:
+            # its top slot offers to open that worktree instead. (Switching
+            # stays reachable via double-click, which raises the open offer.)
+            heldByOtherWorktree = checkedOutWorktree is not None and not isCurrentBranch
+
             actions += [
+                self.openInWorktreeActionDef(checkedOutWorktree)
+                if heldByOtherWorktree else
                 TaskBook.action(
                     self,
                     SwitchBranch,
@@ -303,9 +310,8 @@ class Sidebar(QTreeView):
 
                 TaskBook.action(self, NewBranchFromRef, _("New &Branch Here…"), taskArgs=refName),
 
-                self.openInWorktreeActionDef(checkedOutWorktree)
-                if checkedOutWorktree is not None else
-                TaskBook.action(self, NewWorktree, _("Checkout in New &Worktree…"), taskArgs=branchName),
+                *([TaskBook.action(self, NewWorktree, _("Checkout in New &Worktree…"), taskArgs=branchName)]
+                  if checkedOutWorktree is None else []),
 
                 ActionDef(_("&Copy Branch Name"), lambda: self.copyToClipboard(branchName)),
 

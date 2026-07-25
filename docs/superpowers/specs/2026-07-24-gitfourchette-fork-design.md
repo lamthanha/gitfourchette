@@ -151,3 +151,8 @@ Entirely within the GUI, the user can: rebase the current branch onto an arbitra
    because the branch is checked out in another worktree, the info box becomes a question:
    "Branch X is already checked out in worktree <name>. Open that worktree?" with an
    **Open** button (default-focused) that opens/focuses that worktree's tab, and a Cancel.
+   *Clarified (2026-07-26, user screenshot):* for a branch held by ANOTHER worktree, the
+   "Open in <worktree> Worktree" entry takes over the **Switch to** slot at the top of the
+   context menu (no Switch-to entry remains; no worktree entry at the lower slot). The
+   switch-offer dialog fires only when a switch is actually attempted — double-click/Enter.
+   The current branch keeps upstream's disabled Switch-to and gets no worktree entry.

@@ -384,23 +384,28 @@ def testWorktreesSectionAboveStarredAndLocalBranches(tempDir, mainWindow):
 def testBranchMenuOpensExistingWorktreeInsteadOfNew(tempDir, mainWindow):
     wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
 
-    # no-parent is checked out in LinkedWT -> Open in ... Worktree replaces Checkout in New Worktree
+    # no-parent is held by LinkedWT -> "Open in ... Worktree" takes over the
+    # Switch-to slot; neither Switch-to nor Checkout-in-New-Worktree remains.
     node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
     menu = rw.sidebar.makeNodeMenu(node)
     with pytest.raises(KeyError):
         findMenuAction(menu, "checkout in new worktree")
+    with pytest.raises(KeyError):
+        findMenuAction(menu, "switch to")
     triggerMenuAction(menu, r"open in.+linkedwt.+worktree")
     assert mainWindow.tabs.count() == 2
     assert os.path.realpath(mainWindow.currentRepoWidget().workdir) == os.path.realpath(linked)
 
-    # master is NOT checked out in another worktree... it's checked out in the MAIN worktree ->
-    # also gets the Open entry (pointing at the main worktree)
+    # master is checked out HERE (current branch): keep upstream's disabled
+    # Switch-to; no worktree entry at all (opening our own tab is pointless).
     mainWindow.tabs.setCurrentIndex(0)
     node = rw.sidebar.findNodeByRef("refs/heads/master")
     menu = rw.sidebar.makeNodeMenu(node)
     with pytest.raises(KeyError):
         findMenuAction(menu, "checkout in new worktree")
-    assert findMenuAction(menu, r"open in.+worktree") is not None
+    with pytest.raises(KeyError):
+        findMenuAction(menu, r"open in.+worktree")
+    assert not findMenuAction(menu, "switch to").isEnabled()
 
 
 def testBranchMenuKeepsNewWorktreeWhenNotCheckedOut(tempDir, mainWindow):
@@ -486,9 +491,10 @@ def testNewWorktreeDialogPathLabelHasBuddy(tempDir, mainWindow):
 def testSwitchToBranchCheckedOutElsewhereOffersOpen(tempDir, mainWindow):
     wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
 
+    # The context menu no longer offers Switch-to for a held branch;
+    # the offer is reached by attempting a switch, i.e. double-click/Enter.
     node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
-    menu = rw.sidebar.makeNodeMenu(node)
-    triggerMenuAction(menu, "switch to")
+    rw.sidebar.wantEnterNode(node)
     acceptQMessageBox(rw, r"already checked out in.+linkedwt.+open")
 
     assert mainWindow.tabs.count() == 2
@@ -499,8 +505,7 @@ def testSwitchToBranchCheckedOutElsewhereDeclineDoesNothing(tempDir, mainWindow)
     wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
 
     node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
-    menu = rw.sidebar.makeNodeMenu(node)
-    triggerMenuAction(menu, "switch to")
+    rw.sidebar.wantEnterNode(node)
     rejectQMessageBox(rw, r"already checked out in.+linkedwt.+open")
 
     assert mainWindow.tabs.count() == 1
