@@ -429,6 +429,33 @@ def testBranchMenuAndWorktreeRowIgnorePrunableWorktree(tempDir, mainWindow):
     assert not openAction.isEnabled()
 
 
+def testEnterStaleWorktreeRowFailsSoft(tempDir, mainWindow):
+    """
+    wantEnterNode (double-click/Enter) bypasses the context menu entirely, so
+    the "Open Worktree in New Tab" action being disabled (asserted above)
+    doesn't protect this path: RepoWidget.openWorktreeRepo must guard against
+    a dead path itself instead of letting openRepo blow up with
+    FileNotFoundError when the worktree's folder is gone.
+    """
+    import shutil
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    shutil.rmtree(linked)  # stale admin entry remains, marked prunable by git
+    rw.refreshRepo()
+
+    staleNode = _worktreeNodeByPath(rw, linked)
+    tabCountBefore = mainWindow.tabs.count()
+
+    rw.sidebar.wantEnterNode(staleNode)  # must not raise
+
+    assert mainWindow.tabs.count() == tabCountBefore  # no new tab
+    assert os.path.realpath(mainWindow.currentRepoWidget().workdir) == os.path.realpath(wd)
+    # Friendly status-bar toast instead of a crash dialog (RepoWidget.statusMessage
+    # -> mainWindow.statusBar2, the same lightweight idiom as copyRepoPath()).
+    # Path may be elided (middle-ellipsis) in the message, so just check the
+    # basename survives -- ElideMiddle always keeps the tail of the string.
+    assert os.path.basename(staleNode.data) in mainWindow.statusBar2.currentMessage()
+
+
 def testRemoteBranchMenuOpensWorktreeOfMatchingLocalBranch(tempDir, mainWindow):
     wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     node = rw.sidebar.findNodeByRef("refs/remotes/origin/no-parent")

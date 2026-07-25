@@ -469,17 +469,22 @@ class Sidebar(QTreeView):
                     ActionDef.SEPARATOR,
                 ]
 
-            actions += [
-                ActionDef(_("&Hide in Graph"),
-                          lambda: self.wantHideNode(node),
-                          checkState=[-1, 1][isExplicitlyHidden],
-                          icon="view-hidden"),
+            # Starred folders (fork) aren't real ref folders (synthetic
+            # "starred:" data, no refMatchingPattern) -- canBeHidden() is
+            # False for them, so skip the hide entries entirely instead of
+            # wiring up actions that can never do anything.
+            if node.canBeHidden():
+                actions += [
+                    ActionDef(_("&Hide in Graph"),
+                              lambda: self.wantHideNode(node),
+                              checkState=[-1, 1][isExplicitlyHidden],
+                              icon="view-hidden"),
 
-                ActionDef(_("Hide &All But This"),
-                          lambda: self.wantHideNode(node, True),
-                          checkState=[-1, 1][isExplicitlyShown],
-                          icon="view-exclusive"),
-            ]
+                    ActionDef(_("Hide &All But This"),
+                              lambda: self.wantHideNode(node, True),
+                              checkState=[-1, 1][isExplicitlyShown],
+                              icon="view-exclusive"),
+                ]
 
         elif item == SidebarItem.StashesHeader:
             actions += [

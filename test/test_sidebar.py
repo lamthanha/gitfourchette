@@ -1075,6 +1075,78 @@ def testStarredFolderCollapseIndependentOfLocalBranches(tempDir, mainWindow):
     assert _sbExpanded(rw, getStarredFolder())
 
 
+def testStarredFolderNotHideable(tempDir, mainWindow):
+    """
+    A Starred folder's `data` is a synthetic "starred:"-prefixed key, not a
+    real ref prefix -- there's no refMatchingPattern() for it. It must
+    therefore never expose Hide/Hide-All-But-This: feeding a bogus
+    "starred:.../" pattern into RepoWidget.toggleHideRefPattern would trip
+    its `assert refPattern.startswith("refs/")` (a crash dialog under normal
+    runs; a silent, unmatchable show/hide pattern polluting repoModel.prefs
+    under -O). Covers both the click-zone/paint path (canBeHidden()) and the
+    context-menu path (which must omit the hide entries entirely).
+    """
+    wd = unpackRepo(tempDir)
+    runShellScript("git branch folder/branchname master", wd)
+    rw = mainWindow.openRepo(wd)
+    sb = rw.sidebar
+
+    # Sanity: a REAL ref folder of the same name stays fully hideable.
+    localFolderNode = sb.findNode(lambda n: n.kind == SidebarItem.RefFolder and n.data == "refs/heads/folder")
+    assert localFolderNode.canBeHidden()
+
+    triggerMenuAction(sb.makeNodeMenu(sb.findNodeByRef("refs/heads/folder/branchname")), r"^star branch")
+
+    starRoot = sb.findNodeByKind(SidebarItem.StarredHeader)
+    starredFolderNode = next(c for c in starRoot.children if c.kind == SidebarItem.RefFolder)
+    assert not starredFolderNode.canBeHidden()
+    assert starredFolderNode.refMatchingPattern() == ""
+
+    # Context menu: no rename/delete (data isn't a real refs/heads/... path)
+    # and no hide entries either -> empty actions -> None, same as StarredHeader.
+    assert sb.makeNodeMenu(starredFolderNode) is None
+
+    # Regression: right-click / eye-band click on a starred folder must not
+    # raise, and must not toggle any hide state (getClickZone falls back to
+    # Select since canBeHidden() is now False for this node).
+    index = sb.nodeToFilterIndex(starredFolderNode)
+    rect = sb.visualRect(index)
+    QTest.mouseClick(sb.viewport(), Qt.MouseButton.LeftButton, pos=_eyeClickPos(starredFolderNode, rect))
+    assert not sb.sidebarModel.isExplicitlyHidden(starredFolderNode)
+    assert not sb.sidebarModel.repoModel.prefs.hidePatterns
+    assert not sb.sidebarModel.repoModel.prefs.showPatterns
+
+
+def testHideFromStarredAliasLeaf(tempDir, mainWindow):
+    """
+    Only Starred FOLDERS are inert for hiding (see
+    testStarredFolderNotHideable) -- a starred alias LEAF shares kind/data
+    with its canonical node, so hiding through the alias must work exactly
+    like hiding through the canonical node (real refname -> real pattern).
+    """
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    sb = rw.sidebar
+    sm = sb.sidebarModel
+
+    triggerMenuAction(sb.makeNodeMenu(sb.findNodeByRef("refs/heads/no-parent")), r"^star branch")
+
+    starRoot = sb.findNodeByKind(SidebarItem.StarredHeader)
+    alias = next(c for c in starRoot.children if c.data == "refs/heads/no-parent")
+    assert alias.canBeHidden()
+    assert alias.refMatchingPattern() == "refs/heads/no-parent"
+
+    triggerMenuAction(sb.makeNodeMenu(alias), "hide in graph")
+
+    # The hide actually took effect (mirrors testHideNestedRefFolders' assertions):
+    # both the alias and the canonical node (same kind/data) read as hidden.
+    assert sm.isExplicitlyHidden(alias)
+    assert sm.isExplicitlyHidden(sb.findNodeByRef("refs/heads/no-parent"))
+    aliasIndex = sb.nodeToFilterIndex(alias)
+    tip = aliasIndex.data(Qt.ItemDataRole.ToolTipRole)
+    assert re.search(r"hidden", tip, re.I)
+
+
 def testNoExpandZoneOnChildlessNodes(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     rw = mainWindow.openRepo(wd)

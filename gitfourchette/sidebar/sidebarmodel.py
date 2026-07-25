@@ -202,6 +202,13 @@ class SidebarNode:
         return self.kind in SidebarLayout.ForceExpand
 
     def canBeHidden(self):
+        # Starred folders (fork) aren't real ref folders -- their `data` is a
+        # synthetic STARRED_FOLDER_PREFIX key, not a ref prefix, so there's
+        # no real refMatchingPattern() to hide/show. Without this, the eye
+        # band would paint on a Starred folder row and wire up to a pattern
+        # that can't ever be hidden -- see refMatchingPattern().
+        if self.kind == SidebarItem.RefFolder and self.data.startswith(STARRED_FOLDER_PREFIX):
+            return False
         return self.kind in SidebarLayout.HideableItems
 
     def canBeStarred(self):
@@ -245,6 +252,15 @@ class SidebarNode:
             return f"{RefPrefix.REMOTES}{self.data}/"
 
         if self.kind == SidebarItem.RefFolder:
+            # Starred folders (fork): `data` is a synthetic
+            # STARRED_FOLDER_PREFIX key, not a real ref prefix -- there's no
+            # ref pattern to hide/show here. Returning "" makes wantHideNode
+            # a no-op (it early-returns on a falsy pattern) instead of
+            # feeding a bogus "starred:.../" pattern into
+            # RepoWidget.toggleHideRefPattern, which asserts real refs
+            # start with "refs/".
+            if self.data.startswith(STARRED_FOLDER_PREFIX):
+                return ""
             return f"{self.data}/"
 
         return ""
@@ -677,6 +693,7 @@ class SidebarModel(QAbstractItemModel):
         uses for the global default sort mode.
         """
         sortMode = settings.prefs.refSort
+        assert sortMode != RefSort.UseGlobalPref
 
         entryIter: Iterable[tuple[SidebarItem, str]]
         if sortMode == RefSort.TimeAsc:
@@ -693,7 +710,7 @@ class SidebarModel(QAbstractItemModel):
         for kind, refName in entryIter:
             shorthand = RefPrefix.split(refName)[1]
 
-            if "/" not in shorthand:
+            if not BRANCH_FOLDERS or "/" not in shorthand:
                 folderNode = starredRoot
             else:
                 folderName = shorthand.rsplit("/", 1)[0]

@@ -443,6 +443,13 @@ class RepoWidget(QWidget):
         openFolder(path)
 
     def openWorktreeRepo(self, path: str):
+        if not os.path.isdir(path):
+            # The worktree row can go stale between sidebar rebuilds (its
+            # directory may have been deleted/pruned outside the app) --
+            # fail soft instead of letting downstream RepoStub/openRepo raise
+            # FileNotFoundError on a path that no longer exists.
+            self.statusMessage.emit(_("This worktree no longer exists: {0}", tquoe(path)))
+            return
         self.openRepo.emit(path, NavLocator())
 
     def openRepoFolder(self):
