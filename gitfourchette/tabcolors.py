@@ -68,13 +68,24 @@ def repoBindingKey(workdir: str) -> str:
     return gitdir  # bare repo: the gitdir is the repo itself
 
 
-def resolveTabColorName(workdir: str, repoPrefs) -> str:
+def resolveTabColorName(workdir: str, repoPrefs=None) -> str:
     """
     Resolve the effective tab color name for a worktree, or "" for no dot.
-    repoPrefs is a RepoPrefs (or None for an unloaded tab, where only the
-    repo binding can be honored).
+    repoPrefs (the tab's RepoPrefs, if loaded) is only consulted to migrate a
+    legacy per-worktree override into the global dict.
     """
-    override = repoPrefs.tabColorOverride if repoPrefs is not None else ""
+    wtKey = os.path.realpath(workdir)
+
+    # Legacy migration: pre-redesign builds stored the override in the
+    # worktree's own gitfourchette.json.
+    if repoPrefs is not None and repoPrefs.tabColorOverride:
+        settings.prefs.tabColorOverrides.setdefault(wtKey, repoPrefs.tabColorOverride)
+        repoPrefs.tabColorOverride = ""
+        repoPrefs.setDirty()
+        settings.prefs.setDirty()
+        settings.prefs.write()
+
+    override = settings.prefs.tabColorOverrides.get(wtKey, "")
     if override == OVERRIDE_NONE:
         return ""
     if override in TAB_PALETTE:
@@ -119,7 +130,8 @@ def makeTabColorSubmenu(
     """
     bindingKey = repoBindingKey(workdir)
     currentBinding = settings.prefs.tabColorBindings.get(bindingKey, "")
-    currentOverride = repoPrefs.tabColorOverride if repoPrefs is not None else ""
+    wtKey = os.path.realpath(workdir)
+    currentOverride = settings.prefs.tabColorOverrides.get(wtKey, "")
 
     submenu = QMenu(_("Tab &Color"), parentMenu)
     submenu.setObjectName("MWTabColorMenu")
@@ -134,8 +146,12 @@ def makeTabColorSubmenu(
         refresh()
 
     def setOverride(value: str):
-        repoPrefs.tabColorOverride = value
-        repoPrefs.setDirty()
+        if value:
+            settings.prefs.tabColorOverrides[wtKey] = value
+        else:
+            settings.prefs.tabColorOverrides.pop(wtKey, None)
+        settings.prefs.setDirty()
+        settings.prefs.write()
         refresh()
 
     captions = _swatchCaptions()

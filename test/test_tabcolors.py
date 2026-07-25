@@ -7,7 +7,6 @@
 # -----------------------------------------------------------------------------
 
 import os
-from types import SimpleNamespace
 
 from gitfourchette import tabcolors
 from gitfourchette.application import GFApplication
@@ -45,33 +44,57 @@ def testResolveTabColorNamePrecedence(tempDir, mainWindow):
     from gitfourchette import settings
     wd = unpackRepo(tempDir)
     key = tabcolors.repoBindingKey(wd)
+    wtKey = os.path.realpath(wd)
 
     # No binding, no override
-    assert tabcolors.resolveTabColorName(wd, None) == ""
+    assert tabcolors.resolveTabColorName(wd) == ""
 
     # Binding alone
     settings.prefs.tabColorBindings[key] = "orange"
-    assert tabcolors.resolveTabColorName(wd, None) == "orange"
-
-    # Auto override follows binding
-    ns = SimpleNamespace(tabColorOverride="")
-    assert tabcolors.resolveTabColorName(wd, ns) == "orange"
+    assert tabcolors.resolveTabColorName(wd) == "orange"
 
     # Explicit "none" override beats binding
-    ns.tabColorOverride = "none"
-    assert tabcolors.resolveTabColorName(wd, ns) == ""
+    settings.prefs.tabColorOverrides[wtKey] = "none"
+    assert tabcolors.resolveTabColorName(wd) == ""
 
     # Color override beats binding
-    ns.tabColorOverride = "blue"
-    assert tabcolors.resolveTabColorName(wd, ns) == "blue"
+    settings.prefs.tabColorOverrides[wtKey] = "blue"
+    assert tabcolors.resolveTabColorName(wd) == "blue"
 
     # Unknown override value degrades to binding
-    ns.tabColorOverride = "bogus"
-    assert tabcolors.resolveTabColorName(wd, ns) == "orange"
+    settings.prefs.tabColorOverrides[wtKey] = "bogus"
+    assert tabcolors.resolveTabColorName(wd) == "orange"
+
+    # Removing the override falls back to the binding
+    del settings.prefs.tabColorOverrides[wtKey]
+    assert tabcolors.resolveTabColorName(wd) == "orange"
 
     # Unknown binding value degrades to no dot
     settings.prefs.tabColorBindings[key] = "bogus"
-    assert tabcolors.resolveTabColorName(wd, None) == ""
+    assert tabcolors.resolveTabColorName(wd) == ""
+
+
+def testLegacyRepoPrefsOverrideMigratesToGlobalDict(tempDir, mainWindow):
+    import json
+
+    from gitfourchette import settings
+    wd = unpackRepo(tempDir)
+    # Pre-seed a legacy per-worktree override file (pre-redesign format)
+    legacyFile = os.path.join(wd, ".git", f"{APP_SYSTEM_NAME}.json")
+    with open(legacyFile, "w", encoding="utf-8") as f:
+        json.dump({"tabColorOverride": "blue"}, f)
+
+    rw = mainWindow.openRepo(wd)  # opening resolves colors -> triggers migration
+    wtKey = os.path.realpath(wd)
+    assert settings.prefs.tabColorOverrides == {wtKey: "blue"}
+    assert rw.repoModel.prefs.tabColorOverride == ""
+    assert _tabIconKey(mainWindow, 0) == _dotKey("blue")
+
+    # Legacy value must not clobber an existing global entry (setdefault semantics)
+    settings.prefs.tabColorOverrides[wtKey] = "teal"
+    rw.repoModel.prefs.tabColorOverride = "red"
+    assert tabcolors.resolveTabColorName(wd, rw.repoModel.prefs) == "teal"
+    assert rw.repoModel.prefs.tabColorOverride == ""
 
 
 def testTabDotIconCachedAndDistinct(mainWindow):
@@ -164,21 +187,22 @@ def testBindWholeRepoFromChildWorktreeTab(tempDir, mainWindow):
 
 
 def testWorktreeOverride(tempDir, mainWindow):
-    _wd, _linked, _rwMain, rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+    from gitfourchette import settings
+    _wd, linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
     menu = mainWindow.generateTabContextMenu(0)
     triggerMenuAction(menu, "tab color/orange")
 
     # Override child to "none": child dot disappears, main keeps it
     menu = mainWindow.generateTabContextMenu(1)
     triggerMenuAction(menu, "tab color/only this worktree/no color")
-    assert rwChild.repoModel.prefs.tabColorOverride == "none"
+    assert settings.prefs.tabColorOverrides.get(os.path.realpath(linked)) == "none"
     assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
     assert _tabIconKey(mainWindow, 1) is None
 
     # Override child to blue: child blue, main orange
     menu = mainWindow.generateTabContextMenu(1)
     triggerMenuAction(menu, "tab color/only this worktree/blue")
-    assert rwChild.repoModel.prefs.tabColorOverride == "blue"
+    assert settings.prefs.tabColorOverrides.get(os.path.realpath(linked)) == "blue"
     assert _tabIconKey(mainWindow, 0) == _dotKey("orange")
     assert _tabIconKey(mainWindow, 1) == _dotKey("blue")
     menu = mainWindow.generateTabContextMenu(1)
@@ -187,7 +211,7 @@ def testWorktreeOverride(tempDir, mainWindow):
     # Back to Auto: child follows the binding again
     menu = mainWindow.generateTabContextMenu(1)
     triggerMenuAction(menu, "tab color/only this worktree/auto")
-    assert rwChild.repoModel.prefs.tabColorOverride == ""
+    assert os.path.realpath(linked) not in settings.prefs.tabColorOverrides
     assert _tabIconKey(mainWindow, 1) == _dotKey("orange")
     menu = mainWindow.generateTabContextMenu(1)
     assert findMenuAction(menu, "tab color/only this worktree/auto").isChecked()

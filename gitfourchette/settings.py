@@ -201,6 +201,7 @@ class Prefs(PrefsFile):
     resetDontShowAgain          : bool                  = False
     donatePrompt                : int                   = 0
     refSortClearTimestamp       : int                   = 0
+    tabColorOverrides           : dict[str, str]        = dataclasses.field(default_factory=dict)
 
     @property
     def listViewScrollMode(self) -> QAbstractItemView.ScrollMode:
