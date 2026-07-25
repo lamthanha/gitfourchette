@@ -299,7 +299,8 @@ class Jump(RepoTask):
             nStaged = rw.stagedFiles.model().rowCount()
             rw.diffArea.dirtyHeader.setText(_n("Unstaged ({n})", "Unstaged ({n})", nDirty))
             rw.diffArea.stagedHeader.setText(_n("Staged ({n})", "Staged ({n})", nStaged))
-            rw.diffArea.commitButton.setText(_n("Commit {n} file", "Commit {n} files", nStaged))
+            # Fork: commit button keeps a static label ("Commit" / "Commit and Push" under
+            # Shift, see DiffArea._refreshShiftableButtons) instead of upstream's file count.
 
             commitButtonFont = rw.diffArea.commitButton.font()
             commitButtonBold = nStaged != 0

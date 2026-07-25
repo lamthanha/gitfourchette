@@ -80,6 +80,12 @@ class StagedFiles(FileList):
         deltas = list(self.selectedDeltas())
         UnstageFiles.invoke(self, deltas)
 
+    def unstageAll(self):
+        # Fork: Shift+Unstage — unstage every VISIBLE row (an active filter scopes this).
+        deltas = list(self.flModel.deltas)
+        if deltas:
+            UnstageFiles.invoke(self, deltas)
+
     def unstageModeChange(self):
         deltas = list(self.selectedDeltas())
         UnstageModeChanges.invoke(self, deltas)

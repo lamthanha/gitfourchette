@@ -23,7 +23,7 @@ from gitfourchette.globalshortcuts import GlobalShortcuts
 from gitfourchette.localization import *
 from gitfourchette.nav import NavContext, NavLocator, NavFlags
 from gitfourchette.qt import *
-from gitfourchette.tasks import TaskBook, AmendCommit, NewCommit, NewStash
+from gitfourchette.tasks import TaskBook, AmendCommit, CommitAndPush, NewCommit, NewStash
 from gitfourchette.toolbox import *
 
 FileStackPage = Literal["workdir", "commit"]
@@ -84,6 +84,10 @@ class DiffArea(QWidget):
 
         GFApplication.instance().prefsChanged.connect(self.diffButtons.refreshPrefs)
         self.diffButtons.refreshPrefs()
+
+        # Fork: Shift swaps Stage/Unstage/Commit into their All/Push variants.
+        self._shiftButtonsEngaged = False
+        GFApplication.instance().installEventFilter(self)
 
         # Ignore height in size policy to keep DiffArea from jumping around when we're showing a banner.
         self.setSizePolicy(self.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Ignored)
@@ -148,9 +152,9 @@ class DiffArea(QWidget):
         layout.addWidget(dirtyFiles,            3, 0, 1, 4)
         layout.setRowStretch(3, 100)
 
-        stageButton.clicked.connect(dirtyFiles.stage)
+        stageButton.clicked.connect(self._onStageButtonClicked)
         discardButton.clicked.connect(dirtyFiles.discard)
-        dirtyFiles.selectedCountChanged.connect(lambda n: stageButton.setEnabled(n > 0))
+        dirtyFiles.selectedCountChanged.connect(lambda n: self._refreshShiftableButtons())
         dirtyFiles.selectedCountChanged.connect(lambda n: discardButton.setEnabled(n > 0))
 
         self.dirtyFiles = dirtyFiles
@@ -189,10 +193,10 @@ class DiffArea(QWidget):
         commitButton.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         # Connect signals
-        unstageButton.clicked.connect(stagedFiles.unstage)
-        stagedFiles.selectedCountChanged.connect(lambda n: unstageButton.setEnabled(n > 0))
+        unstageButton.clicked.connect(self._onUnstageButtonClicked)
+        stagedFiles.selectedCountChanged.connect(lambda n: self._refreshShiftableButtons())
 
-        commitButton.clicked.connect(lambda: NewCommit.invoke(self))
+        commitButton.clicked.connect(self._onCommitButtonClicked)
         commitButtonMenu = ActionDef.makeQMenu(
             commitButton,
             [
@@ -341,6 +345,62 @@ class DiffArea(QWidget):
                 *self.diffButtons.buttons,
         ):
             tweakWidgetFont(smallWidget, 90)
+
+    # -------------------------------------------------------------------------
+    # Fork: Shift-modifier button variants (Fork.dev-style)
+
+    def eventFilter(self, watched, event):
+        et = event.type()
+        if et in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            if event.key() == Qt.Key.Key_Shift:
+                self.setShiftButtonsEngaged(et == QEvent.Type.KeyPress)
+        elif et == QEvent.Type.WindowDeactivate and watched is self.window():
+            self.setShiftButtonsEngaged(False)  # don't stick after Alt-Tab
+        return False
+
+    def setShiftButtonsEngaged(self, engaged: bool):
+        if engaged == self._shiftButtonsEngaged:
+            return
+        self._shiftButtonsEngaged = engaged
+        self._refreshShiftableButtons()
+
+    def _refreshShiftableButtons(self):
+        if self._shiftButtonsEngaged:
+            self.stageButton.setText(_("Stage All"))
+            self.unstageButton.setText(_("Unstage All"))
+            self.commitButton.setText(_("Commit and Push"))
+            self.stageButton.setEnabled(not self.dirtyFiles.isEmpty())
+            self.unstageButton.setEnabled(not self.stagedFiles.isEmpty())
+        else:
+            self.stageButton.setText(_("Stage"))
+            self.unstageButton.setText(_("Unstage"))
+            self.commitButton.setText(_p("verb", "Commit"))
+            self.stageButton.setEnabled(bool(self.dirtyFiles.selectedIndexes()))
+            self.unstageButton.setEnabled(bool(self.stagedFiles.selectedIndexes()))
+
+    def _wantShiftVariant(self) -> bool:
+        # Check live modifiers too so a fast Shift+click works even before
+        # the label swap repaints.
+        modifiers = QGuiApplication.keyboardModifiers()
+        return self._shiftButtonsEngaged or bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+
+    def _onStageButtonClicked(self):
+        if self._wantShiftVariant():
+            self.dirtyFiles.stageAll()
+        else:
+            self.dirtyFiles.stage()
+
+    def _onUnstageButtonClicked(self):
+        if self._wantShiftVariant():
+            self.stagedFiles.unstageAll()
+        else:
+            self.stagedFiles.unstage()
+
+    def _onCommitButtonClicked(self):
+        if self._wantShiftVariant():
+            CommitAndPush.invoke(self)
+        else:
+            NewCommit.invoke(self)
 
     # -------------------------------------------------------------------------
     # File navigation

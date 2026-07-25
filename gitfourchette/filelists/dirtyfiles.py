@@ -133,6 +133,12 @@ class DirtyFiles(FileList):
         deltas = list(self.selectedDeltas())
         StageFiles.invoke(self, deltas)
 
+    def stageAll(self):
+        # Fork: Shift+Stage — stage every VISIBLE row (an active filter scopes this).
+        deltas = list(self.flModel.deltas)
+        if deltas:
+            StageFiles.invoke(self, deltas)
+
     def discard(self):
         deltas = list(self.selectedDeltas())
         DiscardFiles.invoke(self, deltas)

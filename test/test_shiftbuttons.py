@@ -67,3 +67,85 @@ def testCommitAndPushCancelledCommitPushesNothing(tempDir, mainWindow):
 
     assert rw.repo.branches.local["master"].target == oldLocalTip
     assert rw.repo.branches.remote["localfs/master"].target == oldRemoteTip
+
+
+def testShiftSwapsStagingButtonLabels(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/hello.txt", "hello")
+    rw = mainWindow.openRepo(wd)
+    area = rw.diffArea
+
+    assert area.stageButton.text() == "Stage"
+    assert area.unstageButton.text() == "Unstage"
+    assert area.commitButton.text() == "Commit"
+
+    QTest.keyPress(mainWindow, Qt.Key.Key_Shift)
+    assert area.stageButton.text() == "Stage All"
+    assert area.unstageButton.text() == "Unstage All"
+    assert area.commitButton.text() == "Commit and Push"
+    # All-variants enable off the LIST, not the selection
+    assert area.stageButton.isEnabled()
+
+    QTest.keyRelease(mainWindow, Qt.Key.Key_Shift)
+    assert area.stageButton.text() == "Stage"
+    assert area.commitButton.text() == "Commit"
+
+
+def testShiftStageAllAndUnstageAll(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/apple.txt", "a")
+    writeFile(f"{wd}/banana.txt", "b")
+    writeFile(f"{wd}/cherry.txt", "c")
+    rw = mainWindow.openRepo(wd)
+    area = rw.diffArea
+
+    QTest.keyPress(mainWindow, Qt.Key.Key_Shift)
+    area.stageButton.click()
+    QTest.keyRelease(mainWindow, Qt.Key.Key_Shift)
+    assert {"apple.txt", "banana.txt", "cherry.txt"} <= set(qlvGetRowData(rw.stagedFiles))
+    assert qlvGetRowData(rw.dirtyFiles) == []
+
+    QTest.keyPress(mainWindow, Qt.Key.Key_Shift)
+    area.unstageButton.click()
+    QTest.keyRelease(mainWindow, Qt.Key.Key_Shift)
+    assert qlvGetRowData(rw.stagedFiles) == []
+    assert {"apple.txt", "banana.txt", "cherry.txt"} <= set(qlvGetRowData(rw.dirtyFiles))
+
+
+def testShiftStageAllScopedToActiveFilter(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/apple.txt", "a")
+    writeFile(f"{wd}/banana.txt", "b")
+    rw = mainWindow.openRepo(wd)
+    area = rw.diffArea
+
+    rw.dirtyFiles.searchBar.popUp()
+    QTest.keyClicks(rw.dirtyFiles.searchBar.lineEdit, "banana")
+    assert qlvGetRowData(rw.dirtyFiles) == ["banana.txt"]
+
+    QTest.keyPress(mainWindow, Qt.Key.Key_Shift)
+    area.stageButton.click()
+    QTest.keyRelease(mainWindow, Qt.Key.Key_Shift)
+
+    assert qlvGetRowData(rw.stagedFiles) == ["banana.txt"]  # only the visible file
+    QTest.keyPress(rw.dirtyFiles.searchBar.lineEdit, Qt.Key.Key_Escape)
+    assert "apple.txt" in qlvGetRowData(rw.dirtyFiles)  # apple stayed unstaged
+
+
+def testShiftCommitButtonRunsCommitAndPush(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    makeBareCopy(wd, addAsRemote="localfs", preFetch=True)
+    writeFile(f"{wd}/pushme.txt", "via the button")
+    rw = mainWindow.openRepo(wd)
+    _stageFirstDirtyFile(rw)
+
+    QTest.keyPress(mainWindow, Qt.Key.Key_Shift)
+    rw.diffArea.commitButton.click()
+    QTest.keyRelease(mainWindow, Qt.Key.Key_Shift)
+
+    dialog: CommitDialog = findQDialog(rw, "commit")
+    QTest.keyClicks(dialog.ui.summaryEditor, "pushed from the button")
+    dialog.acceptButton.click()
+
+    localTip = rw.repo.branches.local["master"].target
+    assert rw.repo.branches.remote["localfs/master"].target == localTip
