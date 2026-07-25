@@ -539,10 +539,11 @@ class MainWindow(QMainWindow):
         )
 
         repoPrefs = widget.repoModel.prefs if isinstance(widget, RepoWidget) else None
-        menu.addMenu(tabcolors.makeTabColorSubmenu(
-            menu, widget.workdir, repoPrefs,
-            refresh=self.refreshTabColors,
-            openSettings=lambda: GFApplication.instance().openPrefsDialog("tabColorBindings")))
+        for colorMenu in tabcolors.makeTabColorMenus(
+                menu, widget.workdir, repoPrefs,
+                refresh=self.refreshTabColors,
+                openSettings=lambda: GFApplication.instance().openPrefsDialog("tabColorBindings")):
+            menu.addMenu(colorMenu)
 
         ActionDef.addToQMenu(
             menu,
@@ -1194,7 +1195,7 @@ class MainWindow(QMainWindow):
                 rw.taskRunner.pendingEpilog.jumpTo = locator
                 rw.refreshRepo()
 
-        if "tabColorBindings" in changedKeys:
+        if changedKeys & {"tabColorBindings", "tabColorOverrides"}:
             self.refreshTabColors()
 
     # -------------------------------------------------------------------------

@@ -15,7 +15,7 @@ from pathlib import Path
 from gitfourchette import colors, settings
 from gitfourchette.localization import *
 from gitfourchette.qt import *
-from gitfourchette.toolbox import stockIcon
+from gitfourchette.toolbox import stockIcon, stripAccelerators
 
 TAB_PALETTE: dict[str, QColor] = {
     "red": colors.red,
@@ -32,13 +32,11 @@ OVERRIDE_NONE = "none"
 "tabColorOverride value: explicitly colorless despite a repo binding."
 
 
-def repoBindingKey(workdir: str) -> str:
+def _commonGitDir(workdir: str) -> str:
     """
-    Binding key for the repo containing this worktree: realpath of the main
-    worktree's root (or of the repo dir itself for a bare repo).
-
-    Parses .git gitfiles and commondir files directly (no pygit2) so it also
-    works for unloaded tabs, and bind-time/resolve-time keys always agree.
+    Absolute path of the repo's common git dir: the main worktree's .git
+    directory, or the repo dir itself for a bare repo. Best-effort for
+    non-repos (returns a path whose basename is not ".git").
     """
     workdir = os.path.realpath(workdir)
     gitdir = os.path.join(workdir, ".git")
@@ -53,6 +51,8 @@ def repoBindingKey(workdir: str) -> str:
             return workdir
         pointer = pointer.removeprefix("gitdir:").strip()
         gitdir = os.path.realpath(os.path.join(workdir, pointer))
+    elif not os.path.isdir(gitdir):
+        return workdir  # bare repo (or not a repo at all)
 
     commondirFile = os.path.join(gitdir, "commondir")
     if os.path.isfile(commondirFile):
@@ -63,26 +63,69 @@ def repoBindingKey(workdir: str) -> str:
         if relCommon:
             gitdir = os.path.realpath(os.path.join(gitdir, relCommon))
 
+    return gitdir
+
+
+def repoBindingKey(workdir: str) -> str:
+    """
+    Binding key for the repo containing this worktree: realpath of the main
+    worktree's root (or of the repo dir itself for a bare repo).
+
+    Parses .git gitfiles and commondir files directly (no pygit2) so it also
+    works for unloaded tabs, and bind-time/resolve-time keys always agree.
+    """
+    gitdir = _commonGitDir(workdir)
     if os.path.basename(gitdir) == ".git":
         return os.path.realpath(os.path.dirname(gitdir))
-    return gitdir  # bare repo: the gitdir is the repo itself
+    return gitdir
 
 
-def resolveTabColorName(workdir: str, repoPrefs) -> str:
+def repoHasLinkedWorktrees(workdir: str) -> bool:
+    """True if the repo containing this worktree has any linked worktrees."""
+    worktreesDir = os.path.join(_commonGitDir(workdir), "worktrees")
+    try:
+        with os.scandir(worktreesDir) as it:
+            return any(it)
+    except OSError:
+        return False
+
+
+def resolveTabColorName(workdir: str, repoPrefs=None) -> str:
     """
     Resolve the effective tab color name for a worktree, or "" for no dot.
-    repoPrefs is a RepoPrefs (or None for an unloaded tab, where only the
-    repo binding can be honored).
+    repoPrefs (the tab's RepoPrefs, if loaded) is only consulted to migrate a
+    legacy per-worktree override into the global dict.
     """
-    override = repoPrefs.tabColorOverride if repoPrefs is not None else ""
+    wtKey = os.path.realpath(workdir)
+
+    # Legacy migration: pre-redesign builds stored the override in the
+    # worktree's own gitfourchette.json.
+    if repoPrefs is not None and repoPrefs.tabColorOverride:
+        settings.prefs.tabColorOverrides.setdefault(wtKey, repoPrefs.tabColorOverride)
+        repoPrefs.tabColorOverride = ""
+        repoPrefs.setDirty()
+        settings.prefs.setDirty()
+        settings.prefs.write()
+        repoPrefs.write()
+
+    color, _provenance = _effectiveStatus(workdir)
+    return color
+
+
+def _effectiveStatus(workdir: str) -> tuple[str, str]:
+    """
+    (colorName, provenance) for a worktree's effective tab color.
+    colorName is "" for no dot; provenance is "override", "binding", or "".
+    """
+    override = settings.prefs.tabColorOverrides.get(os.path.realpath(workdir), "")
     if override == OVERRIDE_NONE:
-        return ""
+        return "", "override"
     if override in TAB_PALETTE:
-        return override
+        return override, "override"
     binding = settings.prefs.tabColorBindings.get(repoBindingKey(workdir), "")
     if binding in TAB_PALETTE:
-        return binding
-    return ""
+        return binding, "binding"
+    return "", ""
 
 
 def tabDotIcon(colorName: str) -> QIcon:
@@ -105,24 +148,51 @@ def _swatchCaptions() -> dict[str, str]:
     }
 
 
-def makeTabColorSubmenu(
+def _plainColorName(name: str) -> str:
+    return stripAccelerators(_swatchCaptions()[name])
+
+
+def _addStatusRow(menu: QMenu, workdir: str):
+    """Disabled first row stating the effective color and where it comes from."""
+    color, provenance = _effectiveStatus(workdir)
+    if not provenance:
+        return
+    if provenance == "override":
+        if color:
+            text = _("{0} — set for this worktree", _plainColorName(color))
+        else:
+            text = _("No color — set for this worktree")
+    else:
+        text = _("{0} — repository color", _plainColorName(color))
+    status = menu.addAction(text)
+    if color:
+        status.setIcon(tabDotIcon(color))
+    status.setEnabled(False)
+    menu.addSeparator()
+
+
+def makeTabColorMenus(
         parentMenu: QMenu,
         workdir: str,
         repoPrefs,
         refresh: Callable[[], None],
         openSettings: Callable[[], None],
-) -> QMenu:
+) -> list[QMenu]:
     """
-    Build the "Tab Color" submenu for a repo tab's context menu.
-    repoPrefs is the tab's RepoPrefs, or None for an unloaded tab (worktree
-    overrides live in the repo's prefs, so that submenu is disabled then).
+    Build the tab-color submenu(s) for a repo tab's context menu.
+    Single-worktree repos get one flat "Tab Color" menu (repository scope).
+    Repos with linked worktrees — or with an override recorded for this
+    worktree — get "Tab Color: Repository" and "Tab Color: This Worktree".
+    repoPrefs (or None for an unloaded tab) only feeds legacy migration.
     """
+    resolveTabColorName(workdir, repoPrefs)  # legacy-migration hook
+
+    wtKey = os.path.realpath(workdir)
     bindingKey = repoBindingKey(workdir)
     currentBinding = settings.prefs.tabColorBindings.get(bindingKey, "")
-    currentOverride = repoPrefs.tabColorOverride if repoPrefs is not None else ""
-
-    submenu = QMenu(_("Tab &Color"), parentMenu)
-    submenu.setObjectName("MWTabColorMenu")
+    currentOverride = settings.prefs.tabColorOverrides.get(wtKey, "")
+    splitMode = repoHasLinkedWorktrees(workdir) or bool(currentOverride)
+    captions = _swatchCaptions()
 
     def setBinding(name: str):
         if name:
@@ -134,48 +204,63 @@ def makeTabColorSubmenu(
         refresh()
 
     def setOverride(value: str):
-        repoPrefs.tabColorOverride = value
-        repoPrefs.setDirty()
+        if value:
+            settings.prefs.tabColorOverrides[wtKey] = value
+        else:
+            settings.prefs.tabColorOverrides.pop(wtKey, None)
+        settings.prefs.setDirty()
+        settings.prefs.write()
         refresh()
 
-    captions = _swatchCaptions()
+    repoTitle = _("Tab &Color: Repository") if splitMode else _("Tab &Color")
+    repoMenu = QMenu(repoTitle, parentMenu)
+    repoMenu.setObjectName("MWTabColorMenu")
+    _addStatusRow(repoMenu, workdir)
 
     for name in TAB_PALETTE:
-        swatch = submenu.addAction(tabDotIcon(name), captions[name])
+        swatch = repoMenu.addAction(tabDotIcon(name), captions[name])
         swatch.setCheckable(True)
         swatch.setChecked(currentBinding == name)
         swatch.triggered.connect(lambda checked=False, n=name: setBinding(n))
 
-    noColor = submenu.addAction(_("&No Color"))
+    noColor = repoMenu.addAction(_("&No Color"))
     noColor.setCheckable(True)
-    noColor.setChecked(not currentBinding)
+    noColor.setChecked(currentBinding not in TAB_PALETTE)
     noColor.triggered.connect(lambda: setBinding(""))
 
-    submenu.addSeparator()
-
-    worktreeMenu = submenu.addMenu(_("Only This &Worktree"))
-    worktreeMenu.setObjectName("MWTabColorWorktreeMenu")
-    if repoPrefs is None:
-        # Disable at the action level: that's what the parent menu displays
-        # and what findMenuAction/isEnabled consult.
-        worktreeMenu.menuAction().setEnabled(False)
-    else:
-        for name in TAB_PALETTE:
-            swatch = worktreeMenu.addAction(tabDotIcon(name), captions[name])
-            swatch.setCheckable(True)
-            swatch.setChecked(currentOverride == name)
-            swatch.triggered.connect(lambda checked=False, n=name: setOverride(n))
-        wtNoColor = worktreeMenu.addAction(_("&No Color"))
-        wtNoColor.setCheckable(True)
-        wtNoColor.setChecked(currentOverride == OVERRIDE_NONE)
-        wtNoColor.triggered.connect(lambda: setOverride(OVERRIDE_NONE))
-        wtAuto = worktreeMenu.addAction(_("A&uto"))  # &A is taken by Gr&ay
-        wtAuto.setCheckable(True)
-        wtAuto.setChecked(currentOverride not in TAB_PALETTE and currentOverride != OVERRIDE_NONE)
-        wtAuto.triggered.connect(lambda: setOverride(""))
-
-    submenu.addSeparator()
-    manage = submenu.addAction(_("&Manage Tab Colors…"))
+    repoMenu.addSeparator()
+    manage = repoMenu.addAction(_("&Manage Tab Colors…"))
     manage.triggered.connect(lambda: openSettings())
 
-    return submenu
+    menus = [repoMenu]
+    if not splitMode:
+        return menus
+
+    wtMenu = QMenu(_("Tab Color: This &Worktree"), parentMenu)
+    wtMenu.setObjectName("MWTabColorWorktreeMenu")
+    _addStatusRow(wtMenu, workdir)
+
+    for name in TAB_PALETTE:
+        swatch = wtMenu.addAction(tabDotIcon(name), captions[name])
+        swatch.setCheckable(True)
+        swatch.setChecked(currentOverride == name)
+        swatch.triggered.connect(lambda checked=False, n=name: setOverride(n))
+
+    wtNoColor = wtMenu.addAction(_("&No Color"))
+    wtNoColor.setCheckable(True)
+    wtNoColor.setChecked(currentOverride == OVERRIDE_NONE)
+    wtNoColor.triggered.connect(lambda: setOverride(OVERRIDE_NONE))
+
+    if currentBinding in TAB_PALETTE:
+        inheritedCaption = _("&Inherited ({0})", _plainColorName(currentBinding))
+    else:
+        inheritedCaption = _("&Inherited (No Color)")
+    inherited = wtMenu.addAction(inheritedCaption)
+    if currentBinding in TAB_PALETTE:
+        inherited.setIcon(tabDotIcon(currentBinding))
+    inherited.setCheckable(True)
+    inherited.setChecked(currentOverride not in TAB_PALETTE and currentOverride != OVERRIDE_NONE)
+    inherited.triggered.connect(lambda: setOverride(""))
+
+    menus.append(wtMenu)
+    return menus

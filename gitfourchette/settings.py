@@ -162,6 +162,7 @@ class Prefs(PrefsFile):
     expandingTabs               : bool                  = True
     autoHideTabs                : bool                  = False
     tabColorBindings            : dict[str, str]        = dataclasses.field(default_factory=dict)
+    tabColorOverrides           : dict[str, str]        = dataclasses.field(default_factory=dict)
 
     _category_mouseShortcuts    : int                   = 0
     _label_tabBarClicks         : int                   = 0

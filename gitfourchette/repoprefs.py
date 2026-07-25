@@ -40,6 +40,8 @@ class RepoPrefs(PrefsFile):
     sortTags: RefSort = RefSort.UseGlobalPref
     refSortClearTimestamp: int = 0
     customKeyFile: str = ""
+    # Legacy (pre-2026-07-25 redesign): superseded by Prefs.tabColorOverrides.
+    # Kept so old files load; migrated & cleared by tabcolors.resolveTabColorName.
     tabColorOverride: str = ""
 
     @classmethod

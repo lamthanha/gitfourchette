@@ -462,7 +462,8 @@ class TrTables:
             "tabCloseButton": _("Show tab close button"),
             "expandingTabs": _("Expand tabs to available width"),
             "autoHideTabs": _("Auto-hide tabs if only one repo is open"),
-            "tabColorBindings": _("Tab colors"),
+            "tabColorBindings": _("Repository tab colors"),
+            "tabColorOverrides": _("Worktree tab colors"),
 
             "chronologicalOrder": _("Sort commits"),
             "chronologicalOrder_true": _("Chronologically"),
