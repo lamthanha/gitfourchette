@@ -40,6 +40,7 @@ class RepoPrefs(PrefsFile):
     sortTags: RefSort = RefSort.UseGlobalPref
     refSortClearTimestamp: int = 0
     customKeyFile: str = ""
+    tabColorOverride: str = ""
 
     @classmethod
     def initForRepo(cls, repo: Repo):
