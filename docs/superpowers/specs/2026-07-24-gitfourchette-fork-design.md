@@ -147,3 +147,7 @@ Entirely within the GUI, the user can: rebase the current branch onto an arbitra
    a checkout-in-new-worktree entry for remote branches remains out of scope).
 3. **Fix:** the New Worktree dialog's "&Path:" label rendered a literal ampersand — QLabels
    only consume mnemonics when they have a buddy; set the path field as its buddy.
+4. **Worktree-aware "already checked out" dialog** (user request): when SwitchBranch bails
+   because the branch is checked out in another worktree, the info box becomes a question:
+   "Branch X is already checked out in worktree <name>. Open that worktree?" with an
+   **Open** button (default-focused) that opens/focuses that worktree's tab, and a Cancel.

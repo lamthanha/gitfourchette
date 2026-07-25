@@ -134,3 +134,14 @@ only a status-bar indicator; a freshly opened repo shows collapsed tags and
 non-tracked remotes; renaming a tracked branch can rename its remote branch
 in the same flow; starring a branch pins a live alias under a Starred group
 that survives app restarts.
+
+## Amendment (2026-07-25 evening, user request): tree-structured Starred section
+
+The Starred section shows flat rows with full slashed shorthands (e.g. "feat/multiselect-rebase").
+Restructure it to mirror the Local Branches/Remotes presentation: RefFolder hierarchy
+("feat" folder containing "multiselect-rebase"), built from the starred refs only.
+Constraints: starred rows remain ALIAS nodes (SidebarNode.walk's StarredHeader skip must keep
+covering the whole starred subtree so nodesByRef/selection-restore never resolve to an alias);
+folder collapse-state must stay INDEPENDENT of the same-named folder in the main sections
+(collapse hashes are kind+data — starred folders need distinct data, e.g. a "starred:" prefix,
+without breaking their display name); unstarring the last child of a folder removes the folder.
