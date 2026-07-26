@@ -295,10 +295,9 @@ class Jump(RepoTask):
                 rw.dirtyFiles.setContents(repoModel.workdirUnstagedDeltas)
                 rw.stagedFiles.setContents(repoModel.workdirStagedDeltas)
 
-            nDirty = rw.dirtyFiles.model().rowCount()
             nStaged = rw.stagedFiles.model().rowCount()
-            rw.diffArea.dirtyHeader.setText(_n("Unstaged ({n})", "Unstaged ({n})", nDirty))
-            rw.diffArea.stagedHeader.setText(_n("Staged ({n})", "Staged ({n})", nStaged))
+            # Fork: header text is now DiffArea's job (also drives the live filter path).
+            rw.diffArea.refreshFileHeaders()
             # Fork: commit button keeps a static label ("Commit" / "Commit and Push" under
             # Shift, see DiffArea._refreshShiftableButtons) instead of upstream's file count.
 

@@ -245,6 +245,11 @@ class FileListModel(QAbstractListModel):
     def rowCount(self, parent: QModelIndex = QModelIndex_default) -> int:
         return len(self.deltas)
 
+    @property
+    def totalRowCount(self) -> int:
+        # Fork: unfiltered delta count (rowCount() is the filtered count).
+        return len(self._allDeltas)
+
     def data(self, index: QModelIndex, role: Qt.ItemDataRole = Qt.ItemDataRole.DisplayRole) -> Any:
         row = index.row()
         try:

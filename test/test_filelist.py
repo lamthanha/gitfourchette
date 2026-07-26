@@ -961,3 +961,47 @@ def testFileListFilterSurvivesRefresh(tempDir, mainWindow):
     writeFile(f"{wd}/bananarama.txt", "b2")
     rw.refreshRepo()
     assert set(qlvGetRowData(dirty)) == {"banana.txt", "bananarama.txt"}
+
+
+def testFileListFilterUpdatesHeaderCounts(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/apple.txt", "a")
+    writeFile(f"{wd}/banana.txt", "b")
+    writeFile(f"{wd}/cherry.txt", "c")
+    rw = mainWindow.openRepo(wd)
+    dirty = rw.dirtyFiles
+    header = rw.diffArea.dirtyHeader
+
+    baselineTotal = len(dirty.flModel.deltas)
+    assert header.text() == f"Unstaged ({baselineTotal})"
+
+    dirty.searchBar.popUp()
+    QTest.keyClicks(dirty.searchBar.lineEdit, "anan")
+    assert qlvGetRowData(dirty) == ["banana.txt"]
+    assert header.text() == f"Unstaged (1/{baselineTotal})"
+
+    QTest.keyPress(dirty.searchBar.lineEdit, Qt.Key.Key_Escape)
+    assert header.text() == f"Unstaged ({baselineTotal})"
+
+
+def testStagedFileListFilterUpdatesHeaderCounts(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/apple.txt", "a")
+    writeFile(f"{wd}/banana.txt", "b")
+    rw = mainWindow.openRepo(wd)
+
+    for _row in (0, 0):  # stage both files (list shrinks after each)
+        qlvClickNthRow(rw.dirtyFiles, 0)
+        QTest.keyPress(rw.dirtyFiles, Qt.Key.Key_Return)
+
+    header = rw.diffArea.stagedHeader
+    baselineTotal = len(rw.stagedFiles.flModel.deltas)
+    assert header.text() == f"Staged ({baselineTotal})"
+
+    rw.stagedFiles.searchBar.popUp()
+    QTest.keyClicks(rw.stagedFiles.searchBar.lineEdit, "banana")
+    assert qlvGetRowData(rw.stagedFiles) == ["banana.txt"]
+    assert header.text() == f"Staged (1/{baselineTotal})"
+
+    QTest.keyPress(rw.stagedFiles.searchBar.lineEdit, Qt.Key.Key_Escape)
+    assert header.text() == f"Staged ({baselineTotal})"

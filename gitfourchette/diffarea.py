@@ -48,6 +48,11 @@ class DiffArea(QWidget):
         self._shiftButtonsEngaged = False
 
         fileStack = self._makeFileStack(repoModel)
+
+        # Fork: keep header counts live (filter narrowing fires modelReset).
+        self.dirtyFiles.flModel.modelReset.connect(self.refreshFileHeaders)
+        self.stagedFiles.flModel.modelReset.connect(self.refreshFileHeaders)
+
         diffContainer = self._makeDiffContainer(repoModel)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -348,6 +353,29 @@ class DiffArea(QWidget):
                 *self.diffButtons.buttons,
         ):
             tweakWidgetFont(smallWidget, 90)
+
+    # -------------------------------------------------------------------------
+    # Fork: live file-list header counts
+
+    def refreshFileHeaders(self):
+        # Fork: headers track the filtered lists live ("shown/total" while narrowed).
+        # Unfiltered text stays byte-identical to upstream's _n(...) output;
+        # only the "shown/total" branch is a new fork string.
+        dirtyModel = self.dirtyFiles.flModel
+        nDirty = dirtyModel.rowCount()
+        nDirtyTotal = dirtyModel.totalRowCount
+        if nDirty != nDirtyTotal:
+            self.dirtyHeader.setText(_("Unstaged ({0}/{1})", nDirty, nDirtyTotal))
+        else:
+            self.dirtyHeader.setText(_n("Unstaged ({n})", "Unstaged ({n})", nDirty))
+
+        stagedModel = self.stagedFiles.flModel
+        nStaged = stagedModel.rowCount()
+        nStagedTotal = stagedModel.totalRowCount
+        if nStaged != nStagedTotal:
+            self.stagedHeader.setText(_("Staged ({0}/{1})", nStaged, nStagedTotal))
+        else:
+            self.stagedHeader.setText(_n("Staged ({n})", "Staged ({n})", nStaged))
 
     # -------------------------------------------------------------------------
     # Fork: Shift-modifier button variants (Fork.dev-style)
