@@ -88,6 +88,7 @@ from gitfourchette.tasks.nettasks import (
     UpdateSubmodule,
     UpdateSubmodulesRecursive,
 )
+# After nettasks: commitpushtasks imports PushBranch, and nettasks itself imports RefreshRepo from this package.
 from gitfourchette.tasks.commitpushtasks import CommitAndPush
 from gitfourchette.tasks.remotetasks import NewRemote, EditRemote, DeleteRemote
 

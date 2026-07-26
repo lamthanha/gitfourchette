@@ -45,6 +45,7 @@ class CommitAndPush(RepoTask):
             "push",
             "--porcelain",
             "--progress",
+            "--",
             remoteName,
             f"refs/heads/{branchName}:refs/heads/{remoteBranchName}")
         self.epilog.status = _("Pushed {0} to {1}.", tquo(branchName), tquo(upstream.shorthand))

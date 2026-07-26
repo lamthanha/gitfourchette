@@ -923,6 +923,29 @@ def testFileListFilterNarrowsAndRestores(tempDir, mainWindow):
     assert qlvGetRowData(dirty) == ["banana.txt"]
 
 
+def testStagedFileListFilterNarrows(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/apple.txt", "a")
+    writeFile(f"{wd}/banana.txt", "b")
+    writeFile(f"{wd}/cherry.txt", "c")
+    rw = mainWindow.openRepo(wd)
+
+    # Stage apple.txt so it shows up in the STAGED list
+    qlvClickNthRow(rw.dirtyFiles, 0)
+    QTest.keyPress(rw.dirtyFiles, Qt.Key.Key_Return)
+    assert qlvGetRowData(rw.stagedFiles) == ["apple.txt"]
+
+    # A term that doesn't match apple.txt narrows the staged list to nothing
+    rw.stagedFiles.searchBar.popUp()
+    QTest.keyClicks(rw.stagedFiles.searchBar.lineEdit, "banana")
+    assert qlvGetRowData(rw.stagedFiles) == []
+
+    # Esc hides the bar AND restores the full staged list
+    QTest.keyPress(rw.stagedFiles.searchBar.lineEdit, Qt.Key.Key_Escape)
+    assert not rw.stagedFiles.searchBar.isVisibleTo(rw)
+    assert qlvGetRowData(rw.stagedFiles) == ["apple.txt"]
+
+
 def testFileListFilterSurvivesRefresh(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     writeFile(f"{wd}/apple.txt", "a")

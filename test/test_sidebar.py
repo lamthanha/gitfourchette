@@ -1447,3 +1447,26 @@ def testHideLocalWithGoneUpstreamDoesNotInjectBogusRef(tempDir, mainWindow):
     rw.toggleHideRefPattern("refs/heads/no-parent")
     assert "refs/heads/no-parent" in rw.repoModel.hiddenRefs
     assert "refs/remotes/origin/gone" not in rw.repoModel.hiddenRefs
+
+
+def testHideLocalWithSharedUpstreamKeepsUpstreamVisible(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        # Second local tracking the same upstream as master
+        repo.create_branch_on_head("master-twin")
+        repo.config["branch.master-twin.remote"] = "origin"
+        repo.config["branch.master-twin.merge"] = "refs/heads/master"
+
+    rw = mainWindow.openRepo(wd)
+    repoModel = rw.repoModel
+    assert repoModel.upstreams["master"] == "origin/master"
+    assert repoModel.upstreams["master-twin"] == "origin/master"
+
+    # Hiding ONE of the two locals keeps the shared upstream visible
+    rw.toggleHideRefPattern("refs/heads/master")
+    assert "refs/heads/master" in repoModel.hiddenRefs
+    assert "refs/remotes/origin/master" not in repoModel.hiddenRefs
+
+    # Hiding BOTH locals finally hides the shared upstream
+    rw.toggleHideRefPattern("refs/heads/master-twin")
+    assert "refs/remotes/origin/master" in repoModel.hiddenRefs

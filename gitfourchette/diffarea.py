@@ -43,6 +43,10 @@ class DiffArea(QWidget):
         super().__init__(parent)
         self.setObjectName("CommitExplorer")
 
+        # Fork: must be set before _makeFileStack() connects selectedCountChanged
+        # lambdas that call _refreshShiftableButtons(), which reads this attribute.
+        self._shiftButtonsEngaged = False
+
         fileStack = self._makeFileStack(repoModel)
         diffContainer = self._makeDiffContainer(repoModel)
 
@@ -86,7 +90,6 @@ class DiffArea(QWidget):
         self.diffButtons.refreshPrefs()
 
         # Fork: Shift swaps Stage/Unstage/Commit into their All/Push variants.
-        self._shiftButtonsEngaged = False
         GFApplication.instance().installEventFilter(self)
 
         # Ignore height in size policy to keep DiffArea from jumping around when we're showing a banner.
