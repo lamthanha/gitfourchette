@@ -11,6 +11,7 @@ import os
 import pytest
 
 from gitfourchette import worktrees
+from gitfourchette.sidebar.sidebarmodel import SidebarItem, SidebarModel
 from .util import *
 
 SAMPLE_PORCELAIN = """\
@@ -128,7 +129,7 @@ def testWorktreesSidebarSection(tempDir, mainWindow):
 
     mainNode, linkedNode = nodes
     assert os.path.realpath(mainNode.data) == os.path.realpath(wd)
-    assert "(main)" in mainNode.displayName
+    assert "(main)" not in mainNode.displayName
     assert os.path.realpath(linkedNode.data) == os.path.realpath(linked)
     assert "(main)" not in linkedNode.displayName
     assert linkedNode.displayName.startswith("LinkedWT")
@@ -150,7 +151,7 @@ def testWorktreesListedFromLinkedWorktreeTab(tempDir, mainWindow):
     rw = mainWindow.openRepo(linked)
     nodes = rw.sidebar.findNodesByKind(SidebarItem.Worktree)
     assert len(nodes) == 2
-    assert "(main)" in nodes[0].displayName
+    assert "(main)" not in nodes[0].displayName
 
 
 def testOpenWorktreeInNewTab(tempDir, mainWindow):
@@ -510,3 +511,45 @@ def testSwitchToBranchCheckedOutElsewhereDeclineDoesNothing(tempDir, mainWindow)
 
     assert mainWindow.tabs.count() == 1
     assert rw.repo.head_branch_shorthand == "master"
+
+
+def testMainWorktreeMarkers(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+
+    # Tab title gets the [M] prefix (repo has a linked worktree)
+    tabText = mainWindow.tabs.tabs.tabText(mainWindow.tabs.currentIndex())
+    assert tabText.startswith("[M] ")
+
+    # Sidebar: main worktree row -> home icon, no "(main)" suffix
+    sm = rw.sidebar.sidebarModel
+    wtHeader = sm.rootNode.findChild(SidebarItem.WorktreesHeader)
+    mainNode = next(n for n in wtHeader.children
+                    if os.path.realpath(n.data) == os.path.realpath(rw.repo.workdir))
+    linkedNode = next(n for n in wtHeader.children if n is not mainNode)
+
+    assert "(main)" not in mainNode.displayName
+    mainIndex = rw.sidebar.nodeToFilterIndex(mainNode)
+    linkedIndex = rw.sidebar.nodeToFilterIndex(linkedNode)
+    assert mainIndex.data(SidebarModel.Role.IconKey) == "SP_DirHomeIcon"
+    assert linkedIndex.data(SidebarModel.Role.IconKey) == "SP_DirIcon"
+
+
+def testNoMainMarkerWithoutLinkedWorktrees(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    mainWindow.openRepo(wd)
+    tabText = mainWindow.tabs.tabs.tabText(mainWindow.tabs.currentIndex())
+    assert not tabText.startswith("[M] ")
+
+
+def testMainMarkerFollowsWorktreeAddAndRemove(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    assert not mainWindow.tabs.tabs.tabText(mainWindow.tabs.currentIndex()).startswith("[M] ")
+
+    runShellScript("git worktree add ../MarkerWT no-parent", wd)
+    rw.refreshRepo()
+    assert mainWindow.tabs.tabs.tabText(mainWindow.tabs.currentIndex()).startswith("[M] ")
+
+    runShellScript("git worktree remove ../MarkerWT", wd)
+    rw.refreshRepo()
+    assert not mainWindow.tabs.tabs.tabText(mainWindow.tabs.currentIndex()).startswith("[M] ")

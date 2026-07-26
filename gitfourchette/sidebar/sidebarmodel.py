@@ -584,10 +584,7 @@ class SidebarModel(QAbstractItemModel):
         # -----------------------------
         for wt in repoModel.worktrees:
             node = SidebarNode(SidebarItem.Worktree, wt.path)
-            name = worktreeName(wt)
-            if wt.isMain:
-                name = _("{0} (main)", name)
-            node.displayName = name
+            node.displayName = worktreeName(wt)
             if wt.prunable:
                 node.warning = _("This worktree can be pruned.")
             elif wt.locked:
@@ -1026,7 +1023,10 @@ class SidebarModel(QAbstractItemModel):
                 self.cacheToolTip(index, text)
                 return text
             elif iconKeyRole:
-                return "achtung" if node.warning else "SP_DirIcon"
+                if node.warning:
+                    return "achtung"
+                # Fork: home icon marks the main worktree
+                return "SP_DirHomeIcon" if wt is not None and wt.isMain else "SP_DirIcon"
             elif fontRole:
                 if os.path.realpath(node.data) == os.path.realpath(self.repo.workdir):
                     font = QFont(self._parentWidget.font())

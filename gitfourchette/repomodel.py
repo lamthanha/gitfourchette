@@ -7,6 +7,7 @@
 import enum
 import itertools
 import logging
+import os
 from collections.abc import Generator, Iterable
 
 from gitfourchette import settings
@@ -384,6 +385,16 @@ class RepoModel:
             prefix = superprojectNickname + ": "
 
         return prefix + settings.history.getRepoNickname(self.repo.workdir)
+
+    def isMainWorktreeWithLinkedWorktrees(self) -> bool:
+        """Fork: True when this repo is the MAIN worktree of a repo that has
+        at least one linked worktree ([M] tab marker)."""
+        worktrees = self.worktrees
+        if len(worktrees) < 2:
+            return False
+        workdir = os.path.realpath(self.repo.workdir)
+        return any(wt.isMain and os.path.realpath(wt.path) == workdir
+                   for wt in worktrees)
 
     @benchmark
     def primeWalker(self) -> Walker:

@@ -792,6 +792,10 @@ class RefreshRepo(RepoTask):
             with QSignalBlockerContext(rw.sidebar):
                 rw.sidebar.refresh(repoModel)
 
+        # Fork: [M] tab marker appears/disappears with the worktree list
+        if worktreesChanged:
+            rw.nameChange.emit()
+
         # Now jump to where we should be after the refresh
         assert rw.navLocator == initialLocator, "locator has changed"
 

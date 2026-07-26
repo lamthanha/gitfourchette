@@ -369,7 +369,10 @@ class RepoWidget(QWidget):
     # -------------------------------------------------------------------------
 
     def getTitle(self) -> str:
-        return self.repoModel.shortName
+        title = self.repoModel.shortName
+        if self.repoModel.isMainWorktreeWithLinkedWorktrees():
+            title = _("[M] {0}", title)
+        return title
 
     def closeEvent(self, event: QCloseEvent):
         """ Called when closing a repo tab """
