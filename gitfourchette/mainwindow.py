@@ -649,6 +649,16 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentWidget(existingWidget)
             return existingWidget
 
+        # Fork: cluster same-repo tabs — a new tab whose repo shares a main
+        # worktree with an existing tab inserts after the last such sibling.
+        # An explicit tabIndex (e.g. openRepoNextTo) always wins.
+        if tabIndex < 0:
+            bindingKey = tabcolors.repoBindingKey(path)
+            siblings = [i for i, w in enumerate(self.tabs.widgets())
+                        if tabcolors.repoBindingKey(w.workdir) == bindingKey]
+            if siblings:
+                tabIndex = siblings[-1] + 1
+
         # Create a RepoStub
         stub = RepoStub(parent=self, workdir=path, locator=locator)
 
@@ -933,31 +943,11 @@ class MainWindow(QMainWindow):
             self.tabs.setTabIcon(i, icon)
 
     def refreshAllTabTexts(self):
-        widgets = list(self.tabs.widgets())
-        baseTitles = [widget.getTitle() for widget in widgets]
-        newTitles = baseTitles[:]
-
-        groupsByTitle: dict[str, list[int]] = {}
-        for i, title in enumerate(baseTitles):
-            groupsByTitle.setdefault(title, []).append(i)
-
-        for group in groupsByTitle.values():
-            if len(group) <= 1:
-                continue
-            # Only disambiguate default (basename) titles; custom nicknames are kept as-is.
-            defaultIndices = [
-                i for i in group
-                if not settings.history.getRepoNickname(widgets[i].workdir, strict=True)]
-            if len(defaultIndices) <= 1:
-                continue
-            workdirs = [widgets[i].workdir for i in defaultIndices]
-            disambiguatedTitles = disambiguateTabTitlesByPath(workdirs)
-            for idx, title in zip(defaultIndices, disambiguatedTitles, strict=True):
-                newTitles[idx] = title
-
-        for i, title in enumerate(newTitles):
-            self.tabs.setTabText(i, escamp(title))
-
+        # Fork: titles stay plain basenames/nicknames — no parent-path
+        # disambiguation for duplicate names (tab colors + [M] marker
+        # carry the distinction).
+        for i, widget in enumerate(self.tabs.widgets()):
+            self.tabs.setTabText(i, escamp(widget.getTitle()))
         self.refreshTabColors()
 
     def openRepoNextTo(self, rw, path: str, locator: NavLocator = NavLocator.Empty):

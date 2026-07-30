@@ -324,8 +324,14 @@ def testRepoNicknameBackgroundTab(tempDir, mainWindow):
     assert "backgroundrepo" in mainWindow.windowTitle()
 
 
-def testTabNameDisambiguationByParentFolders(tempDir, mainWindow):
-    """Test that tab names are disambiguated by parent folders."""
+def testTabNamesPlainDespiteSharedBasenameInDifferentParentFolders(tempDir, mainWindow):
+    """
+    Fork: tab titles are never disambiguated with parent-path fragments, even
+    when two repos share a basename (tab colors + [M] marker carry the
+    distinction instead -- see gitfourchette/mainwindow.py refreshAllTabTexts).
+    Formerly this asserted "a/repo" and "b/repo"; upstream's
+    disambiguateTabTitlesByPath was removed in the fork.
+    """
     wd1 = unpackRepo(tempDir, renameTo="tmprepo1")
     wd2 = unpackRepo(tempDir, renameTo="tmprepo2")
 
@@ -340,14 +346,18 @@ def testTabNameDisambiguationByParentFolders(tempDir, mainWindow):
     mainWindow.openRepo(path1)
     mainWindow.openRepo(path2)
 
-    # Tab names should be "a/repo" and "b/repo" (adjusted for OS separator)
     tabBar = mainWindow.tabs.tabs
-    assert tabBar.tabText(0) == os.path.join("a", "repo")
-    assert tabBar.tabText(1) == os.path.join("b", "repo")
+    assert tabBar.tabText(0) == "repo"
+    assert tabBar.tabText(1) == "repo"
 
 
-def testTabNameDisambiguationFallbackToMiddleEllipsis(tempDir, mainWindow):
-    """If parent folders differ only far from the repo, elide the middle of the path."""
+def testTabNamesPlainDespiteSharedBasenameInDeeplyNestedParentFolders(tempDir, mainWindow):
+    """
+    Fork: same as above, but with parent folders that are only distinct far
+    from the repo -- upstream's disambiguation used to fall back to
+    middle-ellipsis paths here ("a/…/repo" vs "b/…/repo"); the fork still
+    keeps plain basenames regardless of nesting depth.
+    """
     wd1 = unpackRepo(tempDir, renameTo="tmprepo1")
     wd2 = unpackRepo(tempDir, renameTo="tmprepo2")
 
@@ -363,13 +373,17 @@ def testTabNameDisambiguationFallbackToMiddleEllipsis(tempDir, mainWindow):
     mainWindow.openRepo(path2)
 
     tabBar = mainWindow.tabs.tabs
-    ellipsis = "…"
-    assert tabBar.tabText(0) == os.path.join("a", ellipsis, "repo")
-    assert tabBar.tabText(1) == os.path.join("b", ellipsis, "repo")
+    assert tabBar.tabText(0) == "repo"
+    assert tabBar.tabText(1) == "repo"
 
 
-def testTabNameDisambiguationRevertsOnClose(tempDir, mainWindow):
-    """Closing one of two disambiguated tabs reverts the other to the repo name."""
+def testTabNamesStayPlainAfterClosingSibling(tempDir, mainWindow):
+    """
+    Fork: with disambiguation removed, both same-basename tabs are already
+    plain "repo" before closing one of them, and the survivor's title is
+    unaffected by the close (formerly this asserted a "revert" from a
+    disambiguated title back to the plain repo name).
+    """
     wd1 = unpackRepo(tempDir, renameTo="tmprepo1")
     wd2 = unpackRepo(tempDir, renameTo="tmprepo2")
 
@@ -384,8 +398,8 @@ def testTabNameDisambiguationRevertsOnClose(tempDir, mainWindow):
     mainWindow.openRepo(path2)
 
     tabBar = mainWindow.tabs.tabs
-    assert tabBar.tabText(0) == os.path.join("a", "repo")
-    assert tabBar.tabText(1) == os.path.join("b", "repo")
+    assert tabBar.tabText(0) == "repo"
+    assert tabBar.tabText(1) == "repo"
 
     mainWindow.closeTab(0)
     assert mainWindow.tabs.count() == 1

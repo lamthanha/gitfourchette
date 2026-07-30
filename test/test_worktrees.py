@@ -709,3 +709,35 @@ def testMoveWorktreeOpenInTabBlocked(tempDir, mainWindow):
     triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^move worktree")
     acceptQMessageBox(rw, r"close.+tab")
     assert os.path.isdir(linked)
+
+
+def testNewTabOpensAdjacentToSameRepoSiblings(tempDir, mainWindow):
+    # Fork: unpack+rename the unrelated repo first so it vacates the default
+    # "TestGitRepository" extraction path before wd claims it (unpackRepo
+    # asserts the extraction path is free; see test/util.py:262).
+    otherWd = unpackRepo(tempDir, renameTo="UnrelatedRepo")
+    wd = unpackRepo(tempDir)
+    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
+
+    mainWindow.openRepo(wd)
+    mainWindow.openRepo(otherWd)
+    mainWindow.openRepo(linked)  # default placement -> after its sibling, not at the end
+
+    order = [os.path.realpath(w.workdir) for w in mainWindow.tabs.widgets()]
+    assert order == [os.path.realpath(p) for p in (wd, linked, otherWd)]
+
+
+def testTabTitlesStayPlainBasenames(tempDir, mainWindow):
+    # Fork: duplicate-basename tabs are NOT disambiguated with parent paths --
+    # tab colors and the [M] marker carry the distinction (user decision).
+    wd1 = unpackRepo(tempDir)
+    sub = os.path.join(tempDir.name, "elsewhere")
+    os.makedirs(sub)
+    wd2 = unpackRepo(sub)
+
+    mainWindow.openRepo(wd1)
+    mainWindow.openRepo(wd2)
+
+    for i in range(mainWindow.tabs.count()):
+        assert mainWindow.tabs.tabs.tabText(i) == "TestGitRepository"
