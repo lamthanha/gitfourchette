@@ -33,23 +33,17 @@ class NewWorktree(RepoTask):
         if driver.exitCode() != 0:
             raise AbortTask(driver.htmlErrorText())
 
-        self.epilog.effects |= TaskEffects.Refs
+        # Fork-style quiet flow: refresh this tab's sidebar with the new
+        # worktree row *before* switching away. self.rw.openRepo.emit() below
+        # switches tabs synchronously (hiding this RepoWidget), and a hidden
+        # RepoWidget's task runner won't apply queued epilog effects (see
+        # RepoWidget.onTaskRunnerReady) -- so RefreshRepo must run as an
+        # explicit subtask here rather than via self.epilog.effects.
+        from gitfourchette.tasks import RefreshRepo
+        yield from self.flowSubtask(RefreshRepo, TaskEffects.Refs)
 
-        openOffer = yield from self.flowConfirmOpenNewWorktree(path)
-        if openOffer:
-            self.rw.openRepo.emit(path, NavLocator())
-
-    def flowConfirmOpenNewWorktree(self, path: str):
-        try:
-            yield from self.flowConfirm(
-                title=_("Worktree created"),
-                text=_("Worktree created at {0}.", bquo(compactPath(path)))
-                     + "<br>" + _("Open it in a new tab?"),
-                verb=_("Open"),
-                cancelText=_("Not Now"))
-            return True
-        except AbortTask:
-            return False
+        # Open the new worktree's tab directly -- no "open it?" confirmation.
+        self.rw.openRepo.emit(path, NavLocator())
 
 
 class RemoveWorktree(RepoTask):

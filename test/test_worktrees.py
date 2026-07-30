@@ -196,11 +196,11 @@ def testNewWorktreeExistingBranch(tempDir, mainWindow):
     dlg.setExistingBranch("no-parent")
     dlg.accept()
 
-    # Offer to open the new worktree: decline first
-    rejectQMessageBox(rw, r"open.+new tab")
+    # Fork: no "open it?" offer — the new worktree's tab opens directly.
     assert os.path.isdir(target)
-    assert mainWindow.tabs.count() == 1
-    # Sidebar refreshed with the new row
+    assert mainWindow.tabs.count() == 2
+    assert os.path.realpath(mainWindow.currentRepoWidget().workdir) == os.path.realpath(target)
+    # Original tab's sidebar refreshed with the new row
     assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 2
     # The branch is checked out there
     from gitfourchette import worktrees
@@ -208,7 +208,7 @@ def testNewWorktreeExistingBranch(tempDir, mainWindow):
     assert infos[1].branch == "refs/heads/no-parent"
 
 
-def testNewWorktreeNewBranchAndOpenTab(tempDir, mainWindow):
+def testNewWorktreeNewBranchOpensTabQuietly(tempDir, mainWindow):
     from gitfourchette.sidebar.sidebarmodel import SidebarItem
     wd = unpackRepo(tempDir)
     rw = mainWindow.openRepo(wd)
@@ -221,7 +221,6 @@ def testNewWorktreeNewBranchAndOpenTab(tempDir, mainWindow):
     dlg.setNewBranch("wtbranch", "master")
     dlg.accept()
 
-    acceptQMessageBox(rw, r"open.+new tab")
     assert mainWindow.tabs.count() == 2
     assert os.path.realpath(mainWindow.currentRepoWidget().workdir) == os.path.realpath(target)
     assert "wtbranch" in rw.repo.branches.local
@@ -239,8 +238,8 @@ def testCheckoutBranchInNewWorktreeFromBranchMenu(tempDir, mainWindow):
     assert dlg.existingBranch() == "no-parent"  # pre-filled from the menu
     dlg.setPath(target)
     dlg.accept()
-    rejectQMessageBox(rw, r"open.+new tab")
 
+    assert mainWindow.tabs.count() == 2
     from gitfourchette import worktrees
     assert any(wt.branch == "refs/heads/no-parent" for wt in worktrees.listWorktrees(wd))
 
