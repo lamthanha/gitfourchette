@@ -598,3 +598,31 @@ def testNewWorktreeComboPickSelectsExistingRadio(tempDir, mainWindow):
     dlg.existingCombo.activated.emit(dlg.existingCombo.currentIndex())
     assert not dlg.wantNewBranch()  # radio flipped back
     dlg.reject()
+
+
+def testRenderWorktreePathTemplate():
+    from gitfourchette.worktrees import renderWorktreePathTemplate
+    assert renderWorktreePathTemplate(
+        "$BASE_ROOT/$REPO_NAME-$BRANCH", "/home/u/ws/repo", "feature/x") \
+        == os.path.normpath("/home/u/ws/repo-feature-x")
+    assert renderWorktreePathTemplate(
+        "$BASE_PATH-worktrees/$BRANCH", "/home/u/ws/repo", "main") \
+        == os.path.normpath("/home/u/ws/repo-worktrees/main")
+    # Unknown variables stay literal; blank template yields ""
+    assert "$BOGUS" in renderWorktreePathTemplate("$BASE_ROOT/$BOGUS", "/r/x", "b")
+    assert renderWorktreePathTemplate("   ", "/r/x", "b") == ""
+
+
+def testNewWorktreeDialogHonorsPathTemplate(tempDir, mainWindow):
+    from gitfourchette import settings
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    settings.prefs.worktreePathTemplate = "$BASE_PATH-worktrees/$BRANCH"
+
+    from gitfourchette.tasks import NewWorktree
+    NewWorktree.invoke(rw)
+    dlg = findQDialog(rw, r"new worktree")
+    branch = dlg.existingBranch()
+    expected = os.path.normpath(f"{os.path.normpath(wd)}-worktrees/{branch}")
+    assert os.path.normpath(dlg.path()) == expected
+    dlg.reject()

@@ -78,3 +78,24 @@ def listWorktrees(workdir: str) -> list[WorktreeInfo]:
     if not stdout:
         return []
     return parseWorktreeListPorcelain(stdout)
+
+
+DEFAULT_WORKTREE_PATH_TEMPLATE = "$BASE_ROOT/$REPO_NAME-$BRANCH"
+
+
+def renderWorktreePathTemplate(template: str, mainRoot: str, branch: str) -> str:
+    """Expand $BASE_PATH / $BASE_ROOT / $REPO_NAME / $BRANCH in a worktree
+    path template (vocabulary borrowed from VS Code's Git-worktree-manager).
+    Unknown $VARS are left literal. Returns "" for a blank template."""
+    if not template.strip():
+        return ""
+    mainRoot = os.path.normpath(mainRoot)
+    leaf = branch.replace("/", "-") if branch else "worktree"
+    for var, value in (
+            ("$BASE_PATH", mainRoot),
+            ("$BASE_ROOT", os.path.dirname(mainRoot)),
+            ("$REPO_NAME", os.path.basename(mainRoot)),
+            ("$BRANCH", leaf),
+    ):
+        template = template.replace(var, value)
+    return os.path.normpath(template)

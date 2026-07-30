@@ -9,10 +9,12 @@
 import os
 from pathlib import Path
 
+from gitfourchette import settings
 from gitfourchette.localization import *
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.toolbox import *
+from gitfourchette.worktrees import DEFAULT_WORKTREE_PATH_TEMPLATE, renderWorktreePathTemplate
 
 
 class NewWorktreeDialog(QDialog):
@@ -102,9 +104,12 @@ class NewWorktreeDialog(QDialog):
         self.resize(max(640, self.width()), self.height())
 
     def defaultPathForBranch(self, branch: str) -> str:
-        repoName = os.path.basename(self._mainRoot)
-        leaf = branch.replace("/", "-") if branch else "worktree"
-        return os.path.join(os.path.dirname(self._mainRoot), f"{repoName}-{leaf}")
+        path = renderWorktreePathTemplate(
+            settings.prefs.worktreePathTemplate, self._mainRoot, branch)
+        if not path:  # blank template: fall back to the built-in default
+            path = renderWorktreePathTemplate(
+                DEFAULT_WORKTREE_PATH_TEMPLATE, self._mainRoot, branch)
+        return path
 
     def _trackDefaultPath(self):
         if not self._userEditedPath:

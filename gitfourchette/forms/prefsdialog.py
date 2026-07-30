@@ -400,6 +400,8 @@ class PrefsDialog(QDialog):
                 presets[_("Built-in git (sandboxed)")] = builtInGit
             presets[_("Auto-detected system git")] = ToolPresets.defaultGit(hostOnly=True)
             return self.strControlWithPresets(key, value, presets)
+        elif key == "worktreePathTemplate":
+            return self.strControlWithPresets(key, value, {}, leaveBlankHint=True)
         elif key in ("tabColorBindings", "tabColorOverrides"):
             return self.tabColorTableControl(key, value)
         elif issubclass(valueType, enum.Enum):

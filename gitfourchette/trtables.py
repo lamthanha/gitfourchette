@@ -579,6 +579,14 @@ class TrTables:
                 _("Tick this to display the real contents from LFS files."),
                 _("Untick to display the raw text in LFS pointers."),
             ),
+            "worktreePathTemplate": _("New worktree path template"),
+            "worktreePathTemplate_help":
+                "<p style='white-space: pre'>" + _("Path placeholders:") + "\n" + _tokenReferenceTable({
+                    "$BASE_PATH": _("Repo root (main worktree)"),
+                    "$BASE_ROOT": _("Parent directory of the repo root"),
+                    "$REPO_NAME": _("Repo directory name"),
+                    "$BRANCH": _("Branch name (slashes become dashes)"),
+                }),
 
             "mouseShortcuts": _("Mouse Shortcuts"),
             "mouseShortcuts_HEADER": _("Tip: If your mouse has side buttons, you can use them to navigate back/forward in the repo."),

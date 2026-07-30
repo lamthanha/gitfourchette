@@ -145,6 +145,8 @@ class Prefs(PrefsFile):
     ownSshAgent                 : bool                  = False
     ownAskpass                  : bool                  = True
     lfsAware                    : bool                  = True
+    # Kept in sync with worktrees.DEFAULT_WORKTREE_PATH_TEMPLATE (fork extension).
+    worktreePathTemplate        : str                   = "$BASE_ROOT/$REPO_NAME-$BRANCH"
 
     _category_external          : int                   = 0
     externalEditor              : str                   = ""
