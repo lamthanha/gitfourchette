@@ -18,8 +18,8 @@ from gitfourchette.toolbox import *
 
 
 class NewWorktree(RepoTask):
-    def flow(self, branchName: str = ""):
-        dlg = NewWorktreeDialog(self.repo, branchName, self.parentWidget())
+    def flow(self, prefillRef: str = ""):
+        dlg = NewWorktreeDialog(self.repo, prefillRef, self.parentWidget())
         yield from self.flowDialog(dlg)
         dlg.deleteLater()
 

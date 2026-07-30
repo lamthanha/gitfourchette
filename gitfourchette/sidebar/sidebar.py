@@ -310,7 +310,7 @@ class Sidebar(QTreeView):
 
                 TaskBook.action(self, NewBranchFromRef, _("New &Branch Here…"), taskArgs=refName),
 
-                *([TaskBook.action(self, NewWorktree, _("Checkout in New &Worktree…"), taskArgs=branchName)]
+                *([TaskBook.action(self, NewWorktree, _("Checkout in New &Worktree…"), taskArgs=refName)]
                   if checkedOutWorktree is None else []),
 
                 ActionDef(_("&Copy Branch Name"), lambda: self.copyToClipboard(branchName)),
@@ -349,7 +349,10 @@ class Sidebar(QTreeView):
 
             remoteName, remoteBranchName = porcelain.split_remote_branch_shorthand(shorthand)
             localBranchWorktree = self.findWorktreeCheckedOutOn(RefPrefix.HEADS + remoteBranchName)
-            worktreeActions = [self.openInWorktreeActionDef(localBranchWorktree)] if localBranchWorktree is not None else []
+            worktreeActions = (
+                [self.openInWorktreeActionDef(localBranchWorktree)]
+                if localBranchWorktree is not None else
+                [TaskBook.action(self, NewWorktree, _("New &Worktree Here…"), taskArgs=refName)])
             remoteUrl = self.sidebarModel.repo.remotes[remoteName].url
             webUrl, webHost = WebHost.makeLink(remoteUrl, remoteBranchName)
             webActions = []

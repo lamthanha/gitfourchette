@@ -18,12 +18,13 @@ from gitfourchette.worktrees import DEFAULT_WORKTREE_PATH_TEMPLATE, renderWorktr
 
 
 class NewWorktreeDialog(QDialog):
-    def __init__(self, repo: Repo, prefillBranch: str = "", parent=None):
+    def __init__(self, repo: Repo, prefillRef: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("NewWorktreeDialog")
         self.setWindowTitle(_("New Worktree"))
 
         localBranches = sorted(repo.branches.local)
+        remoteBranches = sorted(b for b in repo.branches.remote if not b.endswith("/HEAD"))
 
         self.pathEdit = QLineEdit(self)
         self.pathLabel = QLabel(_("&Path:"), self)
@@ -38,18 +39,40 @@ class NewWorktreeDialog(QDialog):
         self.newRadio = QRadioButton(_("Create a &new branch:"), self)
         self.newNameEdit = QLineEdit(self)
         self.baseRefCombo = QComboBox(self)
-        self.baseRefCombo.addItems(localBranches)
+        self.baseRefCombo.addItems(localBranches + remoteBranches)
 
-        if prefillBranch and prefillBranch in localBranches:
-            self.existingCombo.setCurrentText(prefillBranch)
+        prefillExisting = ""
+        prefillNewName = ""
+        prefillNewBase = ""
+        if prefillRef:
+            prefix, shorthand = RefPrefix.split(prefillRef)
+            if prefix == RefPrefix.REMOTES:
+                _remoteName, tail = split_remote_branch_shorthand(shorthand)
+                if tail in localBranches:
+                    # A same-name local exists: creating it again would be a
+                    # guaranteed git failure — offer the local instead.
+                    prefillExisting = tail
+                else:
+                    prefillNewName = tail
+                    prefillNewBase = shorthand
+            else:
+                prefillExisting = shorthand  # refs/heads/x or bare shorthand
+
+        if prefillExisting and prefillExisting in localBranches:
+            self.existingCombo.setCurrentText(prefillExisting)
         self.existingRadio.setChecked(True)
+        if prefillNewName:
+            self.newRadio.setChecked(True)
+            self.newNameEdit.setText(prefillNewName)
+            self.baseRefCombo.setCurrentText(prefillNewBase)
 
         # Default path: sibling of the main worktree root, named <repo>-<branch>
         mainRoot = os.path.dirname(os.path.normpath(repo.commondir)) \
             if os.path.basename(os.path.normpath(repo.commondir)) == ".git" \
             else os.path.normpath(repo.commondir)
         self._mainRoot = mainRoot
-        self.pathEdit.setText(self.defaultPathForBranch(self.existingCombo.currentText()))
+        initialBranchForPath = prefillNewName if prefillNewName else self.existingCombo.currentText()
+        self.pathEdit.setText(self.defaultPathForBranch(initialBranchForPath))
 
         buttonBox = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)

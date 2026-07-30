@@ -626,3 +626,48 @@ def testNewWorktreeDialogHonorsPathTemplate(tempDir, mainWindow):
     expected = os.path.normpath(f"{os.path.normpath(wd)}-worktrees/{branch}")
     assert os.path.normpath(dlg.path()) == expected
     dlg.reject()
+
+
+def testNewWorktreeFromRemoteBranch(tempDir, mainWindow):
+    # origin/first-merge has NO local counterpart in the canned repo.
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    target = os.path.join(tempDir.name, "RemoteWT")
+
+    node = rw.sidebar.findNodeByRef("refs/remotes/origin/first-merge")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"new worktree here")
+    dlg = findQDialog(rw, r"new worktree")
+    assert dlg.wantNewBranch()
+    assert dlg.newBranchName() == "first-merge"
+    assert dlg.baseRef() == "origin/first-merge"
+    dlg.setPath(target)
+    dlg.accept()
+
+    lb = rw.repo.branches.local["first-merge"]
+    assert lb.upstream is not None
+    assert lb.upstream.shorthand == "origin/first-merge"
+    from gitfourchette import worktrees
+    assert any(wt.branch == "refs/heads/first-merge" for wt in worktrees.listWorktrees(wd))
+
+
+def testNewWorktreeFromRemoteBranchWithExistingLocal(tempDir, mainWindow):
+    # local no-parent exists and is NOT checked out anywhere -> prefill existing mode.
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/remotes/origin/no-parent")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"new worktree here")
+    dlg = findQDialog(rw, r"new worktree")
+    assert not dlg.wantNewBranch()
+    assert dlg.existingBranch() == "no-parent"
+    dlg.reject()
+
+
+def testRemoteBranchMenuHeldLocalShowsOpenInstead(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)  # holds no-parent
+
+    node = rw.sidebar.findNodeByRef("refs/remotes/origin/no-parent")
+    menu = rw.sidebar.makeNodeMenu(node)
+    assert findMenuAction(menu, r"open in.+worktree")
+    with pytest.raises(KeyError):
+        findMenuAction(menu, r"new worktree here")
