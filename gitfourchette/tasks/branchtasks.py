@@ -59,16 +59,18 @@ class SwitchBranch(RepoTask):
             return
 
         if askForConfirmation:
-            text = _("Do you want to switch to branch {0}?", bquo(newBranch))
-            verb = _("Switch")
-
+            # Fork: Fork-style quiet switch — no confirmation dialog unless the
+            # repo has submodules (the recurse checkbox does real work there).
+            # Unsafe switches are still refused by git itself (clobber check),
+            # and the detached-HEAD warning below fires regardless.
             recurseCheckbox = None
             anySubmodules = bool(self.repo.listall_submodules_fast())
             if anySubmodules:
+                text = _("Do you want to switch to branch {0}?", bquo(newBranch))
+                verb = _("Switch")
                 recurseCheckbox = QCheckBox(_("Update submodules recursively"))
                 recurseCheckbox.setChecked(True)
-
-            yield from self.flowConfirm(text=text, verb=verb, checkbox=recurseCheckbox)
+                yield from self.flowConfirm(text=text, verb=verb, checkbox=recurseCheckbox)
             recurseSubmodules = recurseCheckbox is not None and recurseCheckbox.isChecked()
 
         headId = self.repoModel.headCommitId

@@ -448,7 +448,6 @@ def testSidebarHeadIconAfterSwitchingBranchesPointingToSameCommit(tempDir, mainW
     assert otherIcon == "git-branch"
 
     triggerMenuAction(sb.makeNodeMenu(sb.findNodeByRef("refs/heads/other-master")), "switch")
-    acceptQMessageBox(rw, "switch")
 
     masterIcon = sb.indexForRef("refs/heads/master").data(SidebarModel.Role.IconKey)
     otherIcon = sb.indexForRef("refs/heads/other-master").data(SidebarModel.Role.IconKey)

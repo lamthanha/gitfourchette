@@ -673,12 +673,10 @@ def testSwitchBranch(tempDir, mainWindow, method):
         node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
         menu = rw.sidebar.makeNodeMenu(node)
         triggerMenuAction(menu, "switch to")
-        acceptQMessageBox(rw, "switch to")
     elif method == "sidebarkey":
         rw.sidebar.setFocus()
         rw.sidebar.selectAnyRef("refs/heads/no-parent")
         QTest.keyPress(rw.sidebar, Qt.Key.Key_Return)
-        acceptQMessageBox(rw, "switch to")
     elif method in ["graphmenu", "graphkey"]:
         rw.jump(NavLocator.inRef("refs/heads/no-parent"))
         if method == "graphmenu":
@@ -801,7 +799,6 @@ def testSwitchBranchWorkdirConflicts(tempDir, mainWindow):
     node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
     menu = rw.sidebar.makeNodeMenu(node)
     triggerMenuAction(menu, "switch to")
-    acceptQMessageBox(rw, "switch to.+no-parent")
 
     acceptQMessageBox(rw, "your local changes to the following files would be overwritten by checkout")
 
@@ -1208,7 +1205,6 @@ def testMightLoseDetachedHead(tempDir, mainWindow, method):
     if method == "switchbranch":
         node = rw.sidebar.findNodeByRef("refs/heads/master")
         triggerMenuAction(rw.sidebar.makeNodeMenu(node), "switch to")
-        acceptQMessageBox(rw, "switch to")
         acceptQMessageBox(rw, "lose track of this commit")
     elif method == "newbranch":
         oid = Oid(hex="c9ed7bf12c73de26422b7c5a44d74cfce5a8993b")
@@ -1260,7 +1256,6 @@ def testRefreshLibgit2IndexAfterTaskAffectsHead(tempDir, mainWindow):
 
     node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
     triggerMenuAction(rw.sidebar.makeNodeMenu(node), "switch to.+no-parent")
-    acceptQMessageBox(rw, "do you want to switch to.+no-parent")
 
     cherrypickOid = Oid(hex="f73b95671f326616d66b2afb3bdfcdbbce110b44")
     rw.jump(NavLocator.inCommit(cherrypickOid, "a/a1"), check=True)
@@ -1418,3 +1413,32 @@ def testRenameBranchWithoutUpstreamHasNoCheckbox(tempDir, mainWindow):
     dlg = findQDialog(rw, r"rename.+branch")
     assert dlg.findChild(QCheckBox) is None
     dlg.reject()
+
+
+def testSwitchBranchQuietWhenNoSubmodules(tempDir, mainWindow):
+    # Fork: submodule-free switch is silent (Fork-style quiet flow).
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    assert rw.repo.head_branch_shorthand == "master"
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), "switch to")
+
+    # No confirmation box was shown: the switch has already completed.
+    assert rw.repo.head_branch_shorthand == "no-parent"
+
+
+def testSwitchBranchDialogKeptWithSubmodules(tempDir, mainWindow):
+    # Fork: repos with submodules keep the confirm (recurse checkbox does real work).
+    wd = unpackRepo(tempDir)
+    reposcenario.submodule(wd)
+    with RepoContext(wd) as repo:
+        repo.create_branch_on_head("other")
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/other")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), "switch to")
+    qmb = findQMessageBox(rw, "switch to")
+    assert qmb.checkBox() is not None  # recurse-submodules checkbox present
+    qmb.accept()
+    assert rw.repo.head_branch_shorthand == "other"
