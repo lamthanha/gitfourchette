@@ -64,7 +64,7 @@ class MoveWorktree(RepoTask):
             self.parentWidget(),
             _("Move worktree"),
             _("Move worktree {0} to:", bquo(compactPath(path))))
-        dlg.lineEdit.setText(path)
+        dlg.setText(path)
         yield from self.flowDialog(dlg)
         newPath = dlg.lineEdit.text().strip()
         dlg.deleteLater()

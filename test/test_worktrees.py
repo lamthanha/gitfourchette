@@ -679,7 +679,7 @@ def testMoveWorktree(tempDir, mainWindow):
     newPath = os.path.join(os.path.dirname(os.path.normpath(wd)), "MovedWT")
 
     node = _worktreeNodeByPath(rw, linked)
-    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"move worktree")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^move worktree")
     dlg = findQDialog(rw, r"move worktree")
     dlg.lineEdit.setText(newPath)
     dlg.accept()
@@ -695,7 +695,7 @@ def testMoveWorktree(tempDir, mainWindow):
 def testMoveMainWorktreeBlocked(tempDir, mainWindow):
     wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     node = _worktreeNodeByPath(rw, wd)
-    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"move worktree")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^move worktree")
     acceptQMessageBox(rw, r"main worktree")
     assert os.path.isdir(os.path.normpath(wd))
 
@@ -706,6 +706,6 @@ def testMoveWorktreeOpenInTabBlocked(tempDir, mainWindow):
     mainWindow.tabs.setCurrentIndex(0)
 
     node = _worktreeNodeByPath(rw, linked)
-    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"move worktree")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^move worktree")
     acceptQMessageBox(rw, r"close.+tab")
     assert os.path.isdir(linked)
