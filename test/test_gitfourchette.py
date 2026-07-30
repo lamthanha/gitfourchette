@@ -501,6 +501,38 @@ def testCloseManyReposInQuickSuccession(tempDir, mainWindow, taskThread, withGC)
         QTest.qWait(1)  # Simulate some delay as if key-repeating Ctrl+W
 
 
+def testSessionRestorePreservesSavedTabOrder(tempDir, mainWindow):
+    """
+    Fork regression test: MainWindow._openRepo's same-repo tab-adjacency
+    clustering (see gitfourchette/mainwindow.py) must NOT kick in during
+    session restore. Before the fix, restoreSession called _openRepo with the
+    default tabIndex=-1, so a linked worktree of the main repo would get
+    re-clustered right after the main tab, silently reordering the user's
+    saved tab order -- and the activeTab index captured mid-loop would go
+    stale as soon as a later insertion landed mid-list, restoring the wrong
+    tab as the active one. Session restore must keep its saved order, no
+    reordering of existing tabs, ever.
+    """
+    wdMain = unpackRepo(tempDir, renameTo="MainRepo")
+    wdUnrelated = unpackRepo(tempDir, renameTo="UnrelatedRepo")
+    runShellScript("git worktree add ../LinkedWT no-parent", wdMain)
+    wdLinked = os.path.join(os.path.dirname(os.path.normpath(wdMain)), "LinkedWT")
+
+    savedOrder = [wdMain, wdUnrelated, wdLinked]
+
+    sesh = Session()
+    sesh.tabs = list(savedOrder)
+    sesh.activeTabIndex = 1  # middle tab (unrelated repo) is active
+
+    mainWindow.restoreSession(sesh)
+
+    restoredOrder = [w.workdir for w in mainWindow.tabs.widgets()]
+    assert restoredOrder == [os.path.normpath(p) for p in savedOrder]
+
+    activeWidget = mainWindow.tabs.currentWidget()
+    assert activeWidget.workdir == os.path.normpath(wdUnrelated)
+
+
 @pytest.mark.skipif(MACOS, reason="this feature is disabled on macOS")
 def testAutoHideMenuBar(mainWindow):
     menuBar: QMenuBar = mainWindow.menuBar()

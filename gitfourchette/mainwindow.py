@@ -999,7 +999,12 @@ class MainWindow(QMainWindow):
             sloppy = sloppyPaths is not None and path in sloppyPaths
 
             try:
-                newRepoWidget = self._openRepo(path, exactMatch=not sloppy, foreground=False)
+                # Fork: pass an explicit tabIndex so the same-repo adjacency hook in
+                # _openRepo doesn't kick in here -- session restore must preserve the
+                # saved tab order verbatim, and appending at self.tabs.count() also
+                # keeps this loop's tab index (used below) stable as tabs are added.
+                newRepoWidget = self._openRepo(path, exactMatch=not sloppy, foreground=False,
+                                                tabIndex=self.tabs.count())
             except (GitError, OSError, NotImplementedError) as exc:
                 # GitError: most errors thrown by pygit2
                 # OSError: e.g. permission denied

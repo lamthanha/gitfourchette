@@ -741,3 +741,12 @@ def testTabTitlesStayPlainBasenames(tempDir, mainWindow):
 
     for i in range(mainWindow.tabs.count()):
         assert mainWindow.tabs.tabs.tabText(i) == "TestGitRepository"
+
+
+def testWorktreePathTemplateDefaultInSync():
+    # Fork: settings.py hand-duplicates worktrees.DEFAULT_WORKTREE_PATH_TEMPLATE
+    # as the Prefs dataclass field default (see settings.py comment above the
+    # field). Pin them together so the two can't silently drift apart.
+    from gitfourchette import settings
+    from gitfourchette.worktrees import DEFAULT_WORKTREE_PATH_TEMPLATE
+    assert settings.Prefs().worktreePathTemplate == DEFAULT_WORKTREE_PATH_TEMPLATE
