@@ -32,7 +32,7 @@ class NewCommit(RepoTask):
     def prereqs(self):
         return TaskPrereqs.NoConflicts
 
-    def flow(self):
+    def flow(self, buttonCaption: str = ""):
         from gitfourchette.tasks import Jump
 
         uiPrefs = self.repoModel.prefs
@@ -75,6 +75,10 @@ class NewCommit(RepoTask):
             gpgFlag=gpgFlag,
             gpgKey=gpgKey,
             parent=self.parentWidget())
+
+        if buttonCaption:  # Fork: e.g. "Commit and Push" (Shift+Commit)
+            cd.acceptButton.setText(buttonCaption)
+            cd.setWindowTitle(stripAccelerators(buttonCaption))
 
         if uiPrefs.draftCommitSignatureOverride == SignatureOverride.Nothing:
             cd.ui.revealSignature.setChecked(False)

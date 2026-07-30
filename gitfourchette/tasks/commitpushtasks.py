@@ -29,7 +29,7 @@ class CommitAndPush(RepoTask):
         return False
 
     def flow(self):
-        yield from self.flowSubtask(NewCommit)
+        yield from self.flowSubtask(NewCommit, buttonCaption=_("Co&mmit and Push"))
 
         branchName = self.repo.head_branch_shorthand
         branch = self.repo.branches.local[branchName]

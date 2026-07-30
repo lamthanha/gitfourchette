@@ -4,7 +4,7 @@
 
 from gitfourchette.forms.commitdialog import CommitDialog
 from gitfourchette.forms.pushdialog import PushDialog
-from gitfourchette.tasks import CommitAndPush
+from gitfourchette.tasks import CommitAndPush, NewCommit
 
 from .util import *
 
@@ -149,3 +149,24 @@ def testShiftCommitButtonRunsCommitAndPush(tempDir, mainWindow):
 
     localTip = rw.repo.branches.local["master"].target
     assert rw.repo.branches.remote["localfs/master"].target == localTip
+
+
+def testCommitAndPushDialogCaption(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    makeBareCopy(wd, addAsRemote="localfs", preFetch=True)
+    writeFile(f"{wd}/pushme.txt", "and push me now")
+    rw = mainWindow.openRepo(wd)
+    _stageFirstDirtyFile(rw)
+
+    CommitAndPush.invoke(rw)
+    dialog: CommitDialog = findQDialog(rw, "commit")
+    assert dialog.acceptButton.text() == "Co&mmit and Push"
+    assert dialog.windowTitle() == "Commit and Push"
+    dialog.reject()
+
+    # Plain commit dialog is unaffected
+    NewCommit.invoke(rw)
+    dialog2: CommitDialog = findQDialog(rw, "commit")
+    assert dialog2.acceptButton.text() == "Co&mmit"
+    assert dialog2.windowTitle() != "Commit and Push"
+    dialog2.reject()
