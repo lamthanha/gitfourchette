@@ -429,3 +429,28 @@ def testRevealStashParent(tempDir, mainWindow):
     triggerMenuAction(menu, r"^reveal.+parent")
 
     assert rw.navLocator.commit == rw.repo.head_commit_id
+
+
+def testRestoreSingleFileFromStash(tempDir, mainWindow):
+    # Forkette pin: applying a SINGLE file from a stash works via the stash's
+    # file list -> Restore File Revision -> As Of This Commit. (Fork-parity
+    # behavior the fork relies on; upstream feature, pinned here on purpose.)
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/a/a1.txt", "STASHED CONTENT\n")
+    writeFile(f"{wd}/b/b1.txt", "OTHER STASHED FILE\n")
+    runShellScript("git stash push -m probe", wd)
+    rw = mainWindow.openRepo(wd)
+
+    assert readFile(f"{wd}/a/a1.txt").decode() != "STASHED CONTENT\n"
+
+    rw.selectRef("refs/stash")
+    assert "a/a1.txt" in qlvGetRowData(rw.committedFiles)
+    qlvClickNthRow(rw.committedFiles, 0)  # a/a1.txt
+
+    menu = rw.committedFiles.makeContextMenu()
+    triggerMenuAction(menu, r"restore/as of this commit")
+    acceptQMessageBox(rw, r"restore|workdir|working")
+
+    assert readFile(f"{wd}/a/a1.txt").decode() == "STASHED CONTENT\n"
+    # Only that one file was applied:
+    assert readFile(f"{wd}/b/b1.txt").decode() != "OTHER STASHED FILE\n"
