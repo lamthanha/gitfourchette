@@ -10,6 +10,7 @@
 import os
 
 from gitfourchette.forms.newworktreedialog import NewWorktreeDialog
+from gitfourchette.forms.textinputdialog import TextInputDialog
 from gitfourchette.localization import *
 from gitfourchette.nav import NavLocator
 from gitfourchette.porcelain import *
@@ -44,6 +45,35 @@ class NewWorktree(RepoTask):
 
         # Open the new worktree's tab directly -- no "open it?" confirmation.
         self.rw.openRepo.emit(path, NavLocator())
+
+
+class MoveWorktree(RepoTask):
+    def flow(self, path: str):
+        mainInfo = next((wt for wt in self.repoModel.worktrees if wt.isMain), None)
+        if mainInfo is not None and os.path.realpath(path) == os.path.realpath(mainInfo.path):
+            raise AbortTask(_("You can’t move the main worktree."), icon="information")
+
+        from gitfourchette.application import GFApplication
+        mainWindow = GFApplication.instance().mainWindow
+        if mainWindow is not None and mainWindow.tabWidgetForWorkdirPath(path) is not None:
+            raise AbortTask(
+                _("This worktree is open in a tab. Close its tab before moving it."),
+                icon="information")
+
+        dlg = TextInputDialog(
+            self.parentWidget(),
+            _("Move worktree"),
+            _("Move worktree {0} to:", bquo(compactPath(path))))
+        dlg.lineEdit.setText(path)
+        yield from self.flowDialog(dlg)
+        newPath = dlg.lineEdit.text().strip()
+        dlg.deleteLater()
+
+        driver = yield from self.flowCallGit("worktree", "move", path, newPath, autoFail=False)
+        if driver.exitCode() != 0:
+            raise AbortTask(driver.htmlErrorText())
+
+        self.epilog.effects |= TaskEffects.Refs
 
 
 class RemoveWorktree(RepoTask):

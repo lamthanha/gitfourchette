@@ -35,6 +35,7 @@ from gitfourchette.tasks.rebasetasks import (
     SquashCommits,
 )
 from gitfourchette.tasks.worktreetasks import (
+    MoveWorktree,
     NewWorktree,
     PruneWorktrees,
     RemoveWorktree,

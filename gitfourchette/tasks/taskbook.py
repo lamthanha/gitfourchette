@@ -74,6 +74,7 @@ class TaskBook:
             tasks.JumpToUncommittedChanges: _("Go to Working Directory"),
             tasks.LoadPatchInNewWindow: _("Open diff in new window"),
             tasks.MergeBranch: _("Merge branch"),
+            tasks.MoveWorktree: _("Move worktree"),
             tasks.NewBranchFromCommit: _("New local branch"),
             tasks.NewBranchFromHead: _("New local branch"),
             tasks.NewBranchFromRef: _("New local branch"),

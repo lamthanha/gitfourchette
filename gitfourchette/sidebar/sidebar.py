@@ -591,6 +591,7 @@ class Sidebar(QTreeView):
                 ActionDef(_("Open Worktree &Folder"), lambda: openFolder(data)),
                 ActionDef(_("Copy &Path"), lambda: self.copyToClipboard(data)),
                 ActionDef.SEPARATOR,
+                TaskBook.action(self, MoveWorktree, accel="M", taskArgs=data),
                 TaskBook.action(self, RemoveWorktree, accel="R", taskArgs=data),
             ]
 

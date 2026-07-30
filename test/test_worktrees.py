@@ -671,3 +671,41 @@ def testRemoteBranchMenuHeldLocalShowsOpenInstead(tempDir, mainWindow):
     assert findMenuAction(menu, r"open in.+worktree")
     with pytest.raises(KeyError):
         findMenuAction(menu, r"new worktree here")
+
+
+def testMoveWorktree(tempDir, mainWindow):
+    from gitfourchette.sidebar.sidebarmodel import SidebarItem
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    newPath = os.path.join(os.path.dirname(os.path.normpath(wd)), "MovedWT")
+
+    node = _worktreeNodeByPath(rw, linked)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"move worktree")
+    dlg = findQDialog(rw, r"move worktree")
+    dlg.lineEdit.setText(newPath)
+    dlg.accept()
+
+    assert not os.path.exists(linked)
+    assert os.path.isdir(newPath)
+    from gitfourchette import worktrees
+    infos = worktrees.listWorktrees(wd)
+    assert any(os.path.realpath(wt.path) == os.path.realpath(newPath) for wt in infos)
+    assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 2
+
+
+def testMoveMainWorktreeBlocked(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    node = _worktreeNodeByPath(rw, wd)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"move worktree")
+    acceptQMessageBox(rw, r"main worktree")
+    assert os.path.isdir(os.path.normpath(wd))
+
+
+def testMoveWorktreeOpenInTabBlocked(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    mainWindow.openRepo(linked)
+    mainWindow.tabs.setCurrentIndex(0)
+
+    node = _worktreeNodeByPath(rw, linked)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"move worktree")
+    acceptQMessageBox(rw, r"close.+tab")
+    assert os.path.isdir(linked)
