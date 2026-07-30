@@ -86,8 +86,20 @@ class NewWorktreeDialog(QDialog):
         self.newNameEdit.textChanged.connect(self._trackDefaultPath)
         self._userEditedPath = False
         self.pathEdit.textEdited.connect(lambda: setattr(self, "_userEditedPath", True))
+
+        # Open-list fix: typing a new-branch name means "create a new branch";
+        # picking an existing branch from the combo means the opposite.
+        # textEdited/activated fire on user gestures only, so the
+        # setNewBranch()/setExistingBranch() test API stays inert here.
+        self.newNameEdit.textEdited.connect(self._typedNewBranchName)
+        self.existingCombo.activated.connect(self._pickedExistingBranch)
+
         self._revalidate()
         self.setModal(True)
+
+        # Open-list fix: widen so the path (the longest field) is readable.
+        # max() so long translated labels can still widen it further.
+        self.resize(max(640, self.width()), self.height())
 
     def defaultPathForBranch(self, branch: str) -> str:
         repoName = os.path.basename(self._mainRoot)
@@ -98,6 +110,16 @@ class NewWorktreeDialog(QDialog):
         if not self._userEditedPath:
             branch = self.newNameEdit.text() if self.wantNewBranch() else self.existingCombo.currentText()
             self.pathEdit.setText(self.defaultPathForBranch(branch))
+
+    def _typedNewBranchName(self):
+        if not self.newRadio.isChecked():
+            self.newRadio.setChecked(True)  # toggled -> _revalidate
+            self._trackDefaultPath()
+
+    def _pickedExistingBranch(self, _index: int):
+        if not self.existingRadio.isChecked():
+            self.existingRadio.setChecked(True)
+            self._trackDefaultPath()
 
     def _revalidate(self):
         error = ""

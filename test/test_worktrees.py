@@ -552,3 +552,49 @@ def testMainMarkerFollowsWorktreeAddAndRemove(tempDir, mainWindow):
     runShellScript("git worktree remove ../MarkerWT", wd)
     rw.refreshRepo()
     assert not mainWindow.tabs.tabs.tabText(mainWindow.tabs.currentIndex()).startswith("[M] ")
+
+
+def testNewWorktreeDialogWideEnoughForPath(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    from gitfourchette.tasks import NewWorktree
+    NewWorktree.invoke(rw)
+    dlg = findQDialog(rw, r"new worktree")
+    assert dlg.width() >= 640
+    dlg.reject()
+
+
+def testNewWorktreeTypedNameSelectsNewBranchRadio(tempDir, mainWindow):
+    # Open-list bug: typing a name while "existing branch" is checked used to
+    # silently DISCARD the typed name and check out the combo's branch instead.
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    target = os.path.join(tempDir.name, "TypedWT")
+
+    from gitfourchette.tasks import NewWorktree
+    NewWorktree.invoke(rw)
+    dlg = findQDialog(rw, r"new worktree")
+    assert not dlg.wantNewBranch()
+    QTest.keyClicks(dlg.newNameEdit, "typedbranch")
+    assert dlg.wantNewBranch()  # radio flipped by typing
+    assert dlg.newBranchName() == "typedbranch"
+    dlg.setPath(target)
+    dlg.accept()
+
+    assert "typedbranch" in rw.repo.branches.local
+    from gitfourchette import worktrees
+    assert any(wt.branch == "refs/heads/typedbranch" for wt in worktrees.listWorktrees(wd))
+
+
+def testNewWorktreeComboPickSelectsExistingRadio(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    from gitfourchette.tasks import NewWorktree
+    NewWorktree.invoke(rw)
+    dlg = findQDialog(rw, r"new worktree")
+    dlg.setNewBranch("temp", "master")
+    assert dlg.wantNewBranch()
+    # Simulate a user pick on the existing-branch combo (activated = user gesture)
+    dlg.existingCombo.activated.emit(dlg.existingCombo.currentIndex())
+    assert not dlg.wantNewBranch()  # radio flipped back
+    dlg.reject()
