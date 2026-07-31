@@ -475,6 +475,46 @@ def testSidebarVisitRemoteWebPage(tempDir, mainWindow):
         assert services.urls[-1] == QUrl("https://github.com/libgit2/TestGitRepository/tree/master")
 
 
+def testSidebarViewPullRequestsLocalBranchWithGitHubUpstream(tempDir, mainWindow):
+    # "master" already has an upstream (origin/master) in the canned repo,
+    # and "origin" is a real github.com URL -- no extra setup needed.
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    with MockDesktopServicesContext() as services:
+        node = rw.sidebar.findNodeByRef("refs/heads/master")
+        menu = rw.sidebar.makeNodeMenu(node)
+        triggerMenuAction(menu, "view pull requests")
+        assert services.urls[-1] == QUrl(
+            "https://github.com/libgit2/TestGitRepository/pulls?q=is%3Apr%20head%3Amaster")
+
+
+def testSidebarViewPullRequestsLocalBranchWithoutUpstreamOmitsEntry(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        repo.create_branch_on_head("no-upstream-branch")
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/no-upstream-branch")
+    menu = rw.sidebar.makeNodeMenu(node)
+    with pytest.raises(KeyError):
+        findMenuAction(menu, "view pull requests")
+
+
+def testSidebarViewPullRequestsRemoteBranch(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        repo.create_branch_on_head("other-master")
+    rw = mainWindow.openRepo(wd)
+
+    with MockDesktopServicesContext() as services:
+        node = rw.sidebar.findNodeByRef("refs/remotes/origin/master")
+        menu = rw.sidebar.makeNodeMenu(node)
+        triggerMenuAction(menu, "view pull requests")
+        assert services.urls[-1] == QUrl(
+            "https://github.com/libgit2/TestGitRepository/pulls?q=is%3Apr%20head%3Amaster")
+
+
 def testSidebarAheadBehind(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
 

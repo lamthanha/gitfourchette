@@ -4,6 +4,7 @@
 # For full terms, see the included LICENSE file.
 # -----------------------------------------------------------------------------
 
+import urllib.parse
 import warnings
 from collections.abc import Callable, Iterable
 from contextlib import suppress
@@ -224,6 +225,22 @@ class Sidebar(QTreeView):
             activeBranchDisplay = lquoe(activeBranchName)
             upstreamBranchDisplay = lquoe(upstreamBranchName)
 
+            # "View Pull Requests on the Web" (v1, GitHub only): the
+            # /pulls?q= search URL scheme is GitHub-specific; other hosts
+            # (GitLab, etc.) are omitted here for now.
+            prUrl = ""
+            prWebHost = ""
+            if hasUpstream:
+                try:
+                    remoteName, branchTail = porcelain.split_remote_branch_shorthand(upstreamBranchName)
+                    remoteUrl = repo.remotes[remoteName].url
+                except KeyError:
+                    remoteUrl = ""
+                if remoteUrl:
+                    prWebUrl, prWebHost = WebHost.makeLink(remoteUrl)
+                    if prWebUrl and prWebHost == "GitHub":
+                        prUrl = prWebUrl + "/pulls?q=" + urllib.parse.quote(f"is:pr head:{branchTail}")
+
             userCommandTokens = [UserCommand.Token.Commit, UserCommand.Token.Ref]
             if isCurrentBranch:
                 userCommandTokens.extend([
@@ -300,6 +317,13 @@ class Sidebar(QTreeView):
                     icon="git-upstream-missing" if upstreamMissing else ""
                 ),
 
+                *([ActionDef(
+                    _("&View Pull Requests on {0}", escamp(prWebHost)),
+                    lambda: QDesktopServices.openUrl(QUrl(prUrl)),
+                    icon="internet-web-browser",
+                    tip=f"<p style='white-space: pre'>{escape(prUrl)}</p>",
+                )] if prUrl else []),
+
                 ActionDef.SEPARATOR,
 
                 TaskBook.action(self, RenameBranch, _("Re&name…"), taskArgs=branchName),
@@ -357,6 +381,14 @@ class Sidebar(QTreeView):
             webUrl, webHost = WebHost.makeLink(remoteUrl, remoteBranchName)
             webActions = []
             if webUrl:
+                # "View Pull Requests on the Web" (v1, GitHub only): the
+                # /pulls?q= search URL scheme is GitHub-specific; other hosts
+                # (GitLab, etc.) are omitted here for now.
+                prRootUrl, _prWebHost = WebHost.makeLink(remoteUrl)
+                prUrl = ""
+                if prRootUrl and webHost == "GitHub":
+                    prUrl = prRootUrl + "/pulls?q=" + urllib.parse.quote(f"is:pr head:{remoteBranchName}")
+
                 webActions = [
                     ActionDef(
                         _("Visit Web Page on {0}", escamp(webHost)),
@@ -364,6 +396,12 @@ class Sidebar(QTreeView):
                         icon="internet-web-browser",
                         tip=f"<p style='white-space: pre'>{escape(webUrl)}</p>",
                     ),
+                    *([ActionDef(
+                        _("&View Pull Requests on {0}", escamp(webHost)),
+                        lambda: QDesktopServices.openUrl(QUrl(prUrl)),
+                        icon="internet-web-browser",
+                        tip=f"<p style='white-space: pre'>{escape(prUrl)}</p>",
+                    )] if prUrl else []),
                     ActionDef.SEPARATOR,
                 ]
 
