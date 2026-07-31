@@ -36,7 +36,7 @@ gitfourchette-askpass = "gitfourchette.forms.askpassdialog:main"
 gitfourchette-mount = "gitfourchette.mount.treemount:main"
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-qt", "pytest-cov", "pytest-xdist", "ruff==0.16.*"]
+test = ["pytest", "pytest-qt", "pytest-cov", "pytest-xdist", "pytest-timeout", "ruff==0.16.*"]  # Fork: pytest-timeout
 pyqt6 = ["pyqt6"]
 # WARNING: PyQt5 support is deprecated and will be removed soon
 pyqt5 = ["pyqt5"]
@@ -68,6 +68,12 @@ markers = [
 ]
 
 log_format = "%(levelname)-7s %(module)-16s%(lineno)4d | %(message)s"
+
+# Fork: per-test timeout so a hung async dialog (RepoTaskRunner.joinKilledTask()
+# has no timeout of its own) fails loudly instead of hanging fixture teardown
+# forever. Cap picked from `pytest --durations=10`'s slowest test (~13.5s);
+# max(120, ~4x slowest) rounds to the 120s floor.
+timeout = 120
 
 #------------------------------------------------------------------------------
 # Coverage
