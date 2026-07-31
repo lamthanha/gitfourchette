@@ -556,21 +556,46 @@ class FastForwardBranch(RepoTask):
             raise NotImplementedError(f"Cannot fast-forward with {repr(analysis)}.")
 
         self.epilog.effects |= TaskEffects.Refs
+
+        # Hop to the UI thread before reading self.repoModel.worktrees (the
+        # cached worktree list) and before selecting the git invocation.
+        yield from self.flowEnterUiThread()
+
         # Not branch.is_checked_out(): that's worktree-wide, but `git merge`
         # only ever fast-forwards THIS worktree's HEAD. For a branch held by
-        # another worktree, update the ref with `git push .` instead (git
-        # refuses the update if that worktree has the branch checked out).
+        # ANOTHER worktree, mirror Fork: fast-forward it IN that worktree so
+        # its ref and checked-out files advance together. A plain ref update
+        # (`git push .`) is refused by git for a branch checked out elsewhere,
+        # but `git merge --ff-only` run with that worktree as the workdir
+        # updates ref + checkout in one go -- and git itself safely refuses if
+        # that worktree has conflicting local changes. (An ff merge never
+        # fires an editor, so GIT_NO_EDITOR isn't needed here.)
+        workdir = ""
         if branch.shorthand == self.repoModel.homeBranch:
             self.epilog.effects |= TaskEffects.Head
             args = ["merge", "--ff-only", "--progress", branch.upstream_name]
         else:
-            args = ["push", ".", f"{branch.upstream_name}:{branch.name}"]
+            holdingWt = next((wt for wt in self.repoModel.worktrees
+                               if wt.branch == branch.name and not wt.prunable), None)
+            if holdingWt is not None:
+                # Do NOT set TaskEffects.Head: it's the OTHER worktree's HEAD
+                # that moved, not this one. If that worktree happens to be
+                # open in a tab, its autoRefresh-on-focus will pick up the
+                # change -- same class of update as an external change.
+                args = ["merge", "--ff-only", "--progress", branch.upstream_name]
+                workdir = holdingWt.path
+            else:
+                # Checked out nowhere: a plain ref update is safe.
+                args = ["push", ".", f"{branch.upstream_name}:{branch.name}"]
 
-        yield from self.flowEnterUiThread()
-        driver = yield from self.flowCallGit(*args, autoFail=False)
+        driver = yield from self.flowCallGit(*args, workdir=workdir, autoFail=False)
 
         if driver.exitCode() != 0:
-            raise DivergentBranchesError(branch, branch.upstream)
+            # merge_analysis already raised the real divergent case above;
+            # any git failure at this point (e.g. the held worktree has
+            # conflicting local changes) must surface git's own words instead
+            # of a misleading "branches are divergent" dialog.
+            raise AbortTask(driver.htmlErrorText())
 
         return False
 

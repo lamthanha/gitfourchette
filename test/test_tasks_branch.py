@@ -907,15 +907,22 @@ def testFastForwardDivergent(tempDir, mainWindow):
 
 
 def testFastForwardBranchCheckedOutInOtherWorktree(tempDir, mainWindow):
-    # Branch.is_checked_out() is worktree-wide, so FastForwardBranch used to
-    # take the `git merge --ff-only` path for a branch held by ANOTHER
-    # worktree, silently fast-forwarding THIS worktree's branch instead.
+    # This pins the DIVERGENT-held case: merge_analysis refuses at the
+    # analysis level (unrelated history), before any git call is made, so
+    # this holds regardless of whether the branch is held elsewhere or not.
+    # (Verified empirically: "origin/master" would NOT do here -- 42e4e7c
+    # ["no-parent"'s tip] is actually an ANCESTOR of origin/master's tip, so
+    # that pairing is genuinely fast-forwardable, not divergent; the
+    # non-divergent held-branch case now succeeds -- see
+    # testFastForwardBranchHeldByOtherWorktreeAdvancesIt below. "no-parent"
+    # and "origin/first-merge" stem from disjoint root commits, so that
+    # pairing is truly divergent, same as its sibling test below.)
     wd = unpackRepo(tempDir)
     with RepoContext(wd) as repo:
         repo.checkout_local_branch("no-parent")
         noParentTip = repo.branches["no-parent"].target
         repo.create_branch_on_head("wtbranch")
-        repo.edit_upstream_branch("wtbranch", "origin/master")
+        repo.edit_upstream_branch("wtbranch", "origin/first-merge")
     runShellScript("git worktree add ../LinkedWT wtbranch", wd)
     rw = mainWindow.openRepo(wd)
 
@@ -952,6 +959,57 @@ def testFastForwardDivergentBranchCheckedOutInOtherWorktreeOmitsMergeButton(temp
     qmb = findQMessageBox(rw, "can.+t fast.forward.+branches are divergent")
     assert not any(re.search("merge", button.text(), re.IGNORECASE) for button in qmb.buttons())
     qmb.accept()
+
+
+def testFastForwardBranchHeldByOtherWorktreeAdvancesIt(tempDir, mainWindow):
+    # Fork parity: a genuinely fast-forwardable branch held by another
+    # worktree fast-forwards IN that worktree (ref + files together).
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        oldTip = Oid(hex="42e4e7c5e507e113ebbb7801b16b52cf867b7ce1")  # a real ancestor of master's tip
+        repo.create_branch_from_commit("wtbranch", oldTip)
+        repo.edit_upstream_branch("wtbranch", "origin/master")
+    runShellScript("git worktree add ../HeldWT wtbranch", wd)
+    held = os.path.join(os.path.dirname(os.path.normpath(wd)), "HeldWT")
+    rw = mainWindow.openRepo(wd)
+
+    node = rw.sidebar.findNodeByRef("refs/heads/wtbranch")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), "fast.forward")
+
+    assert rw.repo.branches["wtbranch"].target == rw.repo.branches.remote["origin/master"].target
+    # the holding worktree's files advanced too (a file that only exists at master's tip)
+    assert os.path.isfile(os.path.join(held, "master.txt"))
+    # this worktree untouched
+    assert rw.repo.head_branch_shorthand == "master"
+
+
+def testFastForwardBranchHeldByDirtyWorktreeSurfacesGitError(tempDir, mainWindow):
+    # git itself refuses to fast-forward a worktree with conflicting local
+    # changes; the task must surface git's real stderr, not a lying
+    # "branches are divergent" dialog (this pairing IS fast-forwardable).
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        oldTip = Oid(hex="42e4e7c5e507e113ebbb7801b16b52cf867b7ce1")  # a real ancestor of master's tip
+        repo.create_branch_from_commit("wtbranch", oldTip)
+        repo.edit_upstream_branch("wtbranch", "origin/master")
+    runShellScript("git worktree add ../DirtyWT wtbranch", wd)
+    dirty = os.path.join(os.path.dirname(os.path.normpath(wd)), "DirtyWT")
+    # master.txt doesn't exist at wtbranch's tip, but DOES exist at master's
+    # tip -- an untracked file at this path in the held worktree will collide
+    # with the incoming fast-forward and make git refuse.
+    writeFile(os.path.join(dirty, "master.txt"), "conflicting local content\n")
+    rw = mainWindow.openRepo(wd)
+    oldTarget = rw.repo.branches["wtbranch"].target
+
+    node = rw.sidebar.findNodeByRef("refs/heads/wtbranch")
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), "fast.forward")
+
+    # Honest git error -- NOT the misleading "divergent" dialog
+    qmb = findQMessageBox(rw, r"overwritten|local changes|untracked")
+    assert "divergent" not in qmb.text().lower()
+    qmb.accept()
+    assert rw.repo.branches["wtbranch"].target == oldTarget
+    assert readFile(os.path.join(dirty, "master.txt")).decode() == "conflicting local content\n"
 
 
 def testFastForwardDivergentCurrentBranchOffersMergeButton(tempDir, mainWindow):
