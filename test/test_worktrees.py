@@ -605,14 +605,28 @@ def testNewWorktreeBaseRefPopupNotElided(tempDir, mainWindow):
         dlg.baseRefCombo.showPopup()
         QTest.qWait(0)
         view = dlg.baseRefCombo.view()
-        # QComboBox's internal popup delegate reports a fixed size regardless
-        # of item content (view.sizeHintForColumn(0) is a content-independent
-        # constant here) -- this is precisely why the popup needs to be
-        # widened by hand. Assert on view.minimumWidth() (what the fix sets)
-        # rather than view.width(), which is unreliable under the offscreen
-        # QPA platform (its 800px virtual screen clamps popups anyway).
-        required = view.sizeHintForColumn(0) + view.verticalScrollBar().sizeHint().width() + 2 * view.frameWidth()
-        assert view.minimumWidth() >= required
+        # Compute the required width INDEPENDENTLY of the fix's own code
+        # (raw QFontMetrics over the known longest item's text, no fudge
+        # factor, no reference to _widenPopupToFitContents' internals) so
+        # this assertion can't be a tautological X>=X check.
+        #
+        # Assert on view.minimumWidth() rather than view.width(): under the
+        # offscreen QPA platform + Fusion style, QComboBox's popup container
+        # auto-widens somewhat on its own (independently of the fix, up to
+        # the screen's width), which masks view.width()-based comparisons
+        # for moderate-length text -- verified empirically that this exact
+        # fixture's popup naturally ends up ~424px wide with NO fix applied
+        # at all, comfortably covering this item's ~396px text width, so a
+        # view.width() assertion would pass whether or not the fix runs.
+        # view.minimumWidth() has no such natural-widening confound: it's
+        # 0 unless something explicitly sets it, so this directly checks
+        # whether the fix's showPopup hook ran and computed a real,
+        # content-driven floor (not the fixed, content-independent
+        # constant view.sizeHintForColumn(0) returns for QComboBox's
+        # internal popup delegate -- see comment in the fix).
+        fm = dlg.baseRefCombo.fontMetrics()
+        textWidth = fm.horizontalAdvance(longName)
+        assert view.minimumWidth() >= textWidth
         dlg.baseRefCombo.hidePopup()
     finally:
         # Always close the modal even on assertion failure: a RED run that

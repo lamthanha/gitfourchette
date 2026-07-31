@@ -21,17 +21,25 @@ def _widenPopupToFitContents(combo: QComboBox):
     # Companion to setSizeAdjustPolicy(AdjustToMinimumContentsLengthWithIcon)
     # below: capping the closed-state width also caps the popup's item view,
     # so long ref names get elided in the dropdown list. QComboBox's popup
-    # doesn't auto-widen to its widest item on its own, so nudge it open by
-    # hooking showPopup() (standard recipe for this well-known Qt gotcha).
-    # Done in the hook (not just once after addItems) so it stays correct if
-    # items are added/changed later.
+    # doesn't reliably auto-widen to its widest item on its own (on at least
+    # one desktop style, the popup tracks the closed box's capped width), so
+    # nudge it open by hooking showPopup() (standard recipe for this
+    # well-known Qt gotcha). Done in the hook (not just once after
+    # addItems) so it stays correct if items are added/changed later.
+    #
+    # NB: view.sizeHintForColumn()/sizeHintForIndex() are USELESS here --
+    # QComboBox's internal popup delegate reports a fixed size regardless of
+    # item text length (verified empirically: a 1-char and a 100-char item
+    # give identical hints). Measure the real text width via QFontMetrics
+    # over the combo's own items instead.
     originalShowPopup = combo.showPopup
 
     def showPopup():
         view = combo.view()
-        width = (view.sizeHintForColumn(0)
-                 + view.verticalScrollBar().sizeHint().width()
-                 + 2 * view.frameWidth())
+        fm = combo.fontMetrics()
+        textWidth = max((fm.horizontalAdvance(combo.itemText(i)) for i in range(combo.count())), default=0)
+        # +32: fudge factor for icon/style item padding that QFontMetrics doesn't account for.
+        width = textWidth + view.verticalScrollBar().sizeHint().width() + 2 * view.frameWidth() + 32
         view.setMinimumWidth(width)
         originalShowPopup()
 
