@@ -586,6 +586,40 @@ def testNewWorktreeNameFieldNotSqueezedByLongBaseRef(tempDir, mainWindow):
         dlg.reject()
 
 
+def testNewWorktreeBaseRefPopupNotElided(tempDir, mainWindow):
+    # User-reported: capping the closed-state width of baseRefCombo (via
+    # setMinimumContentsLength, see testNewWorktreeNameFieldNotSqueezedBy-
+    # LongBaseRef above) had the side effect of also capping the dropdown
+    # POPUP's width, eliding long ref names in the list (e.g.
+    # "origin/fix/f…ror-handling"). The popup must still widen to fit its
+    # widest item even though the closed box stays capped.
+    longName = "very-long-branch-name-like-664-add-earn-transaction-analytics-events"
+    wd = unpackRepo(tempDir)
+    runShellScript(f"git branch {longName}", wd)
+    rw = mainWindow.openRepo(wd)
+
+    from gitfourchette.tasks import NewWorktree
+    NewWorktree.invoke(rw)
+    dlg = findQDialog(rw, r"new worktree")
+    try:
+        dlg.baseRefCombo.showPopup()
+        QTest.qWait(0)
+        view = dlg.baseRefCombo.view()
+        # QComboBox's internal popup delegate reports a fixed size regardless
+        # of item content (view.sizeHintForColumn(0) is a content-independent
+        # constant here) -- this is precisely why the popup needs to be
+        # widened by hand. Assert on view.minimumWidth() (what the fix sets)
+        # rather than view.width(), which is unreliable under the offscreen
+        # QPA platform (its 800px virtual screen clamps popups anyway).
+        required = view.sizeHintForColumn(0) + view.verticalScrollBar().sizeHint().width() + 2 * view.frameWidth()
+        assert view.minimumWidth() >= required
+        dlg.baseRefCombo.hidePopup()
+    finally:
+        # Always close the modal even on assertion failure: a RED run that
+        # leaves this dialog open hangs teardown until pytest-timeout fires.
+        dlg.reject()
+
+
 def testNewWorktreeTypedNameSelectsNewBranchRadio(tempDir, mainWindow):
     # Open-list bug: typing a name while "existing branch" is checked used to
     # silently DISCARD the typed name and check out the combo's branch instead.

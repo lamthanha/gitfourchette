@@ -17,6 +17,27 @@ from gitfourchette.toolbox import *
 from gitfourchette.worktrees import DEFAULT_WORKTREE_PATH_TEMPLATE, renderWorktreePathTemplate
 
 
+def _widenPopupToFitContents(combo: QComboBox):
+    # Companion to setSizeAdjustPolicy(AdjustToMinimumContentsLengthWithIcon)
+    # below: capping the closed-state width also caps the popup's item view,
+    # so long ref names get elided in the dropdown list. QComboBox's popup
+    # doesn't auto-widen to its widest item on its own, so nudge it open by
+    # hooking showPopup() (standard recipe for this well-known Qt gotcha).
+    # Done in the hook (not just once after addItems) so it stays correct if
+    # items are added/changed later.
+    originalShowPopup = combo.showPopup
+
+    def showPopup():
+        view = combo.view()
+        width = (view.sizeHintForColumn(0)
+                 + view.verticalScrollBar().sizeHint().width()
+                 + 2 * view.frameWidth())
+        view.setMinimumWidth(width)
+        originalShowPopup()
+
+    combo.showPopup = showPopup
+
+
 class NewWorktreeDialog(QDialog):
     def __init__(self, repo: Repo, prefillRef: str = "", parent=None):
         super().__init__(parent)
@@ -40,6 +61,7 @@ class NewWorktreeDialog(QDialog):
         # names are short in practice, so this is a no-op most of the time).
         self.existingCombo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.existingCombo.setMinimumContentsLength(16)
+        _widenPopupToFitContents(self.existingCombo)
 
         self.newRadio = QRadioButton(_("Create a &new branch:"), self)
         self.newNameEdit = QLineEdit(self)
@@ -51,6 +73,7 @@ class NewWorktreeDialog(QDialog):
         # list still shows full names; only the collapsed box is capped.
         self.baseRefCombo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.baseRefCombo.setMinimumContentsLength(16)
+        _widenPopupToFitContents(self.baseRefCombo)
 
         prefillExisting = ""
         prefillNewName = ""
