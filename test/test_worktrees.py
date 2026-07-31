@@ -564,6 +564,28 @@ def testNewWorktreeDialogWideEnoughForPath(tempDir, mainWindow):
     dlg.reject()
 
 
+def testNewWorktreeNameFieldNotSqueezedByLongBaseRef(tempDir, mainWindow):
+    # User-reported: a long branch name in the base-ref combo starved the
+    # new-branch name field down to a few characters (no stretch factor on
+    # newRow, and the combo's sizeHint ballooning with its longest item).
+    longName = "very-long-branch-name-like-664-add-earn-transaction-analytics-events"
+    wd = unpackRepo(tempDir)
+    runShellScript(f"git branch {longName}", wd)
+    rw = mainWindow.openRepo(wd)
+
+    from gitfourchette.tasks import NewWorktree
+    NewWorktree.invoke(rw)
+    dlg = findQDialog(rw, r"new worktree")
+    dlg.setNewBranch("x", longName)
+    try:
+        assert dlg.baseRefCombo.currentText() == longName
+        assert dlg.newNameEdit.width() >= 150
+    finally:
+        # Always close the modal even on assertion failure: a RED run that
+        # leaves this dialog open hangs teardown until pytest-timeout fires.
+        dlg.reject()
+
+
 def testNewWorktreeTypedNameSelectsNewBranchRadio(tempDir, mainWindow):
     # Open-list bug: typing a name while "existing branch" is checked used to
     # silently DISCARD the typed name and check out the combo's branch instead.

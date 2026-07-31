@@ -35,11 +35,22 @@ class NewWorktreeDialog(QDialog):
         self.existingRadio = QRadioButton(_("Check out an &existing branch:"), self)
         self.existingCombo = QComboBox(self)
         self.existingCombo.addItems(localBranches)
+        # existingCombo doesn't share a row with another widget, so it can't
+        # starve a sibling, but cap it too for consistency (local branch
+        # names are short in practice, so this is a no-op most of the time).
+        self.existingCombo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.existingCombo.setMinimumContentsLength(16)
 
         self.newRadio = QRadioButton(_("Create a &new branch:"), self)
         self.newNameEdit = QLineEdit(self)
         self.baseRefCombo = QComboBox(self)
         self.baseRefCombo.addItems(localBranches + remoteBranches)
+        # A long remote ref (e.g. "origin/feature/some-very-long-name") must
+        # not balloon the combo's sizeHint and starve newNameEdit of width:
+        # cap the closed-state width to a fixed content length. The popup
+        # list still shows full names; only the collapsed box is capped.
+        self.baseRefCombo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.baseRefCombo.setMinimumContentsLength(16)
 
         prefillExisting = ""
         prefillNewName = ""
@@ -88,7 +99,7 @@ class NewWorktreeDialog(QDialog):
         pathRow.addWidget(browseButton)
 
         newRow = QHBoxLayout()
-        newRow.addWidget(self.newNameEdit)
+        newRow.addWidget(self.newNameEdit, 1)  # give the name field the lion's share of the row
         newRow.addWidget(QLabel(_("from:"), self))
         newRow.addWidget(self.baseRefCombo)
 
