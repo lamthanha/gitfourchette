@@ -18,6 +18,7 @@ from gitfourchette.settings import SHORT_DATE_PRESETS, prefs
 from gitfourchette.syntax import ColorScheme, PygmentsPresets, syntaxHighlightingAvailable
 from gitfourchette.toolbox import *
 from gitfourchette.trtables import TrTables
+from gitfourchette.worktrees import DEFAULT_WORKTREE_PATH_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -401,7 +402,12 @@ class PrefsDialog(QDialog):
             presets[_("Auto-detected system git")] = ToolPresets.defaultGit(hostOnly=True)
             return self.strControlWithPresets(key, value, presets)
         elif key == "worktreePathTemplate":
-            return self.strControlWithPresets(key, value, {}, leaveBlankHint=True)
+            # Fork: blank means "use the built-in template" here, not "system
+            # default" -- so show the literal template as a placeholder
+            # instead of the generic leaveBlankHint text.
+            control = self.strControlWithPresets(key, value, {}, leaveBlankHint=False)
+            control.lineEdit().setPlaceholderText(DEFAULT_WORKTREE_PATH_TEMPLATE)
+            return control
         elif key in ("tabColorBindings", "tabColorOverrides"):
             return self.tabColorTableControl(key, value)
         elif issubclass(valueType, enum.Enum):

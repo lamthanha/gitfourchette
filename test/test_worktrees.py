@@ -692,6 +692,43 @@ def testMoveWorktree(tempDir, mainWindow):
     assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 2
 
 
+def testMoveWorktreeValidation(tempDir, mainWindow):
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    node = _worktreeNodeByPath(rw, linked)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^move worktree")
+    dlg = findQDialog(rw, r"move worktree")
+    assert not dlg.okButton.isEnabled()          # prefilled with UNCHANGED path -> invalid
+    dlg.lineEdit.setText("")
+    assert not dlg.okButton.isEnabled()          # blank -> invalid
+    dlg.lineEdit.setText(os.path.normpath(wd))
+    assert not dlg.okButton.isEnabled()          # existing non-empty dir -> invalid
+    good = os.path.join(os.path.dirname(os.path.normpath(wd)), "GoodMoveTarget")
+    dlg.lineEdit.setText(good)
+    assert dlg.okButton.isEnabled()              # fresh path -> valid
+    dlg.reject()
+
+
+def testMoveWorktreeMigratesPathKeyedState(tempDir, mainWindow):
+    from gitfourchette import settings
+    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    newPath = os.path.join(os.path.dirname(os.path.normpath(wd)), "MovedKeyedWT")
+
+    settings.history.setRepoNickname(linked, "my-nick")
+    settings.prefs.tabColorOverrides[os.path.realpath(linked)] = "red"
+
+    node = _worktreeNodeByPath(rw, linked)
+    triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^move worktree")
+    dlg = findQDialog(rw, r"move worktree")
+    dlg.lineEdit.setText(newPath)
+    dlg.accept()
+
+    assert not os.path.exists(linked)
+    assert settings.history.getRepoNickname(newPath, strict=True) == "my-nick"
+    assert settings.history.getRepoNickname(linked, strict=True) == ""
+    assert settings.prefs.tabColorOverrides.get(os.path.realpath(newPath)) == "red"
+    assert os.path.realpath(linked) not in settings.prefs.tabColorOverrides
+
+
 def testMoveMainWorktreeBlocked(tempDir, mainWindow):
     wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     node = _worktreeNodeByPath(rw, wd)

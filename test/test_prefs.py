@@ -10,6 +10,7 @@ from gitfourchette import settings
 from gitfourchette.forms.prefsdialog import PrefsDialog
 from gitfourchette.nav import NavLocator
 from gitfourchette.toolbox.fontpicker import FontPicker
+from gitfourchette.worktrees import DEFAULT_WORKTREE_PATH_TEMPLATE
 from .util import *
 
 
@@ -221,4 +222,14 @@ def testPrefsUserCommandsGuide(mainWindow):
     assert not guideBrowser.isVisible()
     assert not guideButton.isChecked()
 
+    dlg.reject()
+
+
+def testPrefsWorktreePathTemplateHint(mainWindow):
+    # Fork: blank means "use the built-in template" for this pref, so the
+    # control shows the literal template as a placeholder instead of the
+    # generic "leave blank for system default" hint.
+    dlg = GFApplication.instance().openPrefsDialog("worktreePathTemplate")
+    control: QWidget = dlg.findChild(QWidget, "prefctl_worktreePathTemplate")
+    assert control.lineEdit().placeholderText() == DEFAULT_WORKTREE_PATH_TEMPLATE
     dlg.reject()

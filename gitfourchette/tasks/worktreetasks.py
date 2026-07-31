@@ -8,7 +8,9 @@
 # -----------------------------------------------------------------------------
 
 import os
+from pathlib import Path
 
+from gitfourchette import settings
 from gitfourchette.forms.newworktreedialog import NewWorktreeDialog
 from gitfourchette.forms.textinputdialog import TextInputDialog
 from gitfourchette.localization import *
@@ -60,11 +62,29 @@ class MoveWorktree(RepoTask):
                 _("This worktree is open in a tab. Close its tab before moving it."),
                 icon="information")
 
+        def validate(candidate: str) -> str:
+            candidate = candidate.strip()
+            if not candidate:
+                return _("Enter a path for the worktree.")
+            try:
+                if os.path.realpath(candidate) == os.path.realpath(path):
+                    return _("This is already the worktree’s current location.")
+                if Path(candidate).is_file():
+                    return _("There’s already a file at this path.")
+                if Path(candidate).is_dir() and any(Path(candidate).iterdir()):
+                    return _("This directory exists and is not empty.")
+            except OSError:
+                return _("This path can’t be checked.")
+            return ""
+
         dlg = TextInputDialog(
             self.parentWidget(),
             _("Move worktree"),
-            _("Move worktree {0} to:", bquo(compactPath(path))))
+            "",
+            subtitle=_("Move worktree {0} to:", bquo(os.path.basename(os.path.normpath(path)))),
+            multilineSubtitle=True)
         dlg.setText(path)
+        dlg.setValidator(validate)
         yield from self.flowDialog(dlg)
         newPath = dlg.lineEdit.text().strip()
         dlg.deleteLater()
@@ -72,6 +92,25 @@ class MoveWorktree(RepoTask):
         driver = yield from self.flowCallGit("worktree", "move", path, newPath, autoFail=False)
         if driver.exitCode() != 0:
             raise AbortTask(driver.htmlErrorText())
+
+        # Migrate path-keyed state that was recorded under the worktree's old
+        # location: tab color override (keyed by realpath) and history entry
+        # -- nickname, etc. (keyed by normpath).
+        oldTabColorKey = os.path.realpath(path)
+        tabColor = settings.prefs.tabColorOverrides.pop(oldTabColorKey, None)
+        if tabColor is not None:
+            settings.prefs.tabColorOverrides[os.path.realpath(newPath)] = tabColor
+            settings.prefs.setDirty()
+            settings.prefs.write()
+
+        oldHistoryEntry = settings.history.repos.pop(os.path.normpath(path), None)
+        if oldHistoryEntry is not None:
+            newHistoryEntry = settings.history.getRepo(newPath)
+            seq = newHistoryEntry.get('seq', oldHistoryEntry.get('seq'))
+            newHistoryEntry.update(oldHistoryEntry)
+            if seq is not None:
+                newHistoryEntry['seq'] = seq
+            settings.history.setDirty()
 
         self.epilog.effects |= TaskEffects.Refs
 
