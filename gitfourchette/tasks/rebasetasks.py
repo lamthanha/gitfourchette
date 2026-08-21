@@ -64,12 +64,16 @@ class RebaseOnto(RepoTask):
             branchName = repo.head_branch_shorthand
 
         headId = repo.head_commit_id
-        ahead, _behind = repo.ahead_behind(headId, ontoId)
-        if ahead == 0:
+        ahead, behind = repo.ahead_behind(headId, ontoId)
+        if ahead == 0 and behind == 0:
             raise AbortTask(
                 _("There’s nothing to rebase: {0} has no commits of its own "
                   "beyond {1}.", bquo(branchName), bquo(ontoDisplay)),
                 icon="information")
+
+        # No commits to replay, but we're behind the target: git just moves the
+        # branch forward. That's a legitimate outcome, not a no-op.
+        fastForward = ahead == 0
 
         # Fork-style flow: a clean worktree rebases immediately; only prompt
         # (with the autostash option) when there's something to stash.
@@ -82,9 +86,14 @@ class RebaseOnto(RepoTask):
         if dirty:
             autostashCheckbox = QCheckBox(_("Autostash (stash uncommitted changes, then reapply them)"))
             autostashCheckbox.setChecked(True)
+            if fastForward:
+                plan = _("{0} has no commits of its own, so it will simply be "
+                         "fast-forwarded to {1}.", bquo(branchName), bquo(ontoDisplay))
+            else:
+                plan = _n("{n} commit will be replayed.", "{n} commits will be replayed.", n=ahead)
             text = paragraphs(
                 _("Do you want to rebase {0} onto {1}?", bquo(branchName), bquo(ontoDisplay)),
-                _n("{n} commit will be replayed.", "{n} commits will be replayed.", n=ahead),
+                plan,
                 _("You have uncommitted changes."))
             yield from self.flowConfirm(text=text, verb=_("Rebase"), checkbox=autostashCheckbox)
             autostash = autostashCheckbox.isChecked()
@@ -92,7 +101,9 @@ class RebaseOnto(RepoTask):
         yield from _flowRebaseGit(
             self,
             "rebase", *argsIf(autostash, "--autostash"), str(ontoId),
-            successStatus=_("Rebased {0} onto {1}.", tquo(branchName), tquo(ontoDisplay)),
+            successStatus=(
+                _("Fast-forwarded {0} to {1}.", tquo(branchName), tquo(ontoDisplay)) if fastForward
+                else _("Rebased {0} onto {1}.", tquo(branchName), tquo(ontoDisplay))),
             upToDateStatus=_("{0} is already up to date with {1}.", tquo(branchName), tquo(ontoDisplay)))
 
 

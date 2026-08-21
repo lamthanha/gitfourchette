@@ -77,6 +77,65 @@ def testRebaseOntoNothingToDo(tempDir, mainWindow):
     assert rw.repo.state() == RepositoryState.NONE
 
 
+def testRebaseOntoFastForward(tempDir, mainWindow):
+    # The branch has no commits of its own, but it does trail the target:
+    # git fast-forwards it. That's a real operation, not "nothing to rebase".
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch -c feature master
+        git switch master
+        echo "master only" > master.txt
+        git add master.txt
+        git commit -m "master: own file"
+        git switch feature
+        """,
+        wd)
+    rw = mainWindow.openRepo(wd)
+    masterTip = rw.repo.branches.local["master"].target
+
+    rw.jump(NavLocator.inCommit(masterTip))
+    triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.branches.local["feature"].target == masterTip
+    assert re.search(r"fast-forward", mainWindow.statusBar().currentMessage(), re.I)
+
+
+def testRebaseOntoFastForwardDirty(tempDir, mainWindow):
+    # Same fast-forward, dirty tree: the confirm dialog must announce the
+    # fast-forward instead of claiming "0 commits will be replayed".
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch master
+        echo "notes" > notes.txt
+        git add notes.txt
+        git commit -m "base: notes"
+        git switch -c feature
+        git switch master
+        echo "master only" > master.txt
+        git add master.txt
+        git commit -m "master: own file"
+        git switch feature
+        echo "notes dirty" > notes.txt
+        """,
+        wd)
+    rw = mainWindow.openRepo(wd)
+    masterTip = rw.repo.branches.local["master"].target
+
+    rw.jump(NavLocator.inCommit(masterTip))
+    triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
+    qmb = findQMessageBox(rw, r"fast-forward")
+    assert "0 commit" not in qmb.text() + qmb.informativeText()
+    qmb.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.branches.local["feature"].target == masterTip
+    assert readFile(f"{wd}/notes.txt").decode() == "notes dirty\n"
+    assert len(rw.repo.listall_stashes()) == 0
+
+
 def testRebaseOntoConflict(tempDir, mainWindow):
     wd = makeDivergentBranches(tempDir)
     rw = mainWindow.openRepo(wd)
