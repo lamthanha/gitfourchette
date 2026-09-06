@@ -836,7 +836,8 @@ class Sidebar(QTreeView):
             EditRemote.invoke(self, data)
 
         elif item == SidebarItem.RemoteBranch:
-            RenameRemoteBranch.invoke(self, data)
+            assert data.startswith(RefPrefix.REMOTES)
+            RenameRemoteBranch.invoke(self, data.removeprefix(RefPrefix.REMOTES))
 
         elif item == SidebarItem.RefFolder:
             prefix, name = RefPrefix.split(data)
