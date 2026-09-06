@@ -40,7 +40,12 @@ def testValidateFirstKeptCannotBeSquashOrFixup():
 
 
 def testValidateAllDropped():
-    assert validateTodo([row("a", "one", "drop"), row("b", "two", "drop")]) != ""
+    rows = [row("a", "one", "drop"), row("b", "two", "drop")]
+    # Legitimate: git executes the drop lines and resets the branch to the base
+    assert validateTodo(rows) == ""
+    # No base to fall back on (rebase --root): git would leave an empty commit
+    assert validateTodo(rows, hasBase=False) != ""
+    assert validateTodo([row("a", "one", "drop"), row("b", "two")], hasBase=False) == ""
 
 
 def testValidateRewordNeedsMessage():

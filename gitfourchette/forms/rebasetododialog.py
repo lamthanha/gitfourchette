@@ -50,12 +50,13 @@ class _TodoTable(QTreeWidget):
 
 class RebaseTodoDialog(QDialog):
     def __init__(self, rowsNewestFirst: list[RebaseTodoRow], flattenedMerges: int,
-                 offerAutostash: bool, parent=None):
+                 offerAutostash: bool, hasBase: bool = True, parent=None):
         super().__init__(parent)
         self.setObjectName("RebaseTodoDialog")
         self.setWindowTitle(_("Interactive Rebase"))
         self.setModal(True)
         self._offerAutostash = offerAutostash
+        self._hasBase = hasBase
 
         self.hintLabel = QLabel(
             _("Commits are listed newest first, like the graph. "
@@ -224,7 +225,7 @@ class RebaseTodoDialog(QDialog):
         self._revalidate()
 
     def _revalidate(self):
-        error = validateTodo(self.executionRows())
+        error = validateTodo(self.executionRows(), self._hasBase)
         self.errorLabel.setText(error)
         self.errorLabel.setVisible(bool(error))
         self.okButton.setEnabled(not error)

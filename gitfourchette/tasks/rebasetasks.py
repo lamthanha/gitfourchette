@@ -198,7 +198,7 @@ def _flowExecuteTodo(task: RepoTask, execRows: list[RebaseTodoRow], baseId: Oid 
         raise AbortTask(_("The repository changed while the dialog was open. "
                           "Start the interactive rebase again."))
 
-    todoError = validateTodo(execRows)
+    todoError = validateTodo(execRows, baseId is not None)
     if todoError:
         raise AbortTask(todoError)
 
@@ -238,7 +238,8 @@ class InteractiveRebase(RepoTask):
     def flow(self, fromCommit: Oid):
         rows, baseId, flattenedMerges, dirty, headId = yield from _flowPrepareTodo(self, fromCommit)
 
-        dlg = RebaseTodoDialog(rows, flattenedMerges, dirty, self.parentWidget())
+        dlg = RebaseTodoDialog(rows, flattenedMerges, dirty, baseId is not None,
+                               self.parentWidget())
         yield from self.flowDialog(dlg)
         dlg.deleteLater()
         execRows = dlg.executionRows()
@@ -302,7 +303,7 @@ class DropCommits(RepoTask):
             rows[i].action = "drop"
         execRows = list(reversed(rows))
 
-        todoError = validateTodo(execRows)
+        todoError = validateTodo(execRows, baseId is not None)
         if todoError:
             raise AbortTask(todoError)
 

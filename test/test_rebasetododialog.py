@@ -28,8 +28,8 @@ def _rows():
     ]
 
 
-def _dialog(mainWindow, rows=None, flattenedMerges=0, offerAutostash=False):
-    dlg = RebaseTodoDialog(rows or _rows(), flattenedMerges, offerAutostash, None)
+def _dialog(mainWindow, rows=None, flattenedMerges=0, offerAutostash=False, hasBase=True):
+    dlg = RebaseTodoDialog(rows or _rows(), flattenedMerges, offerAutostash, hasBase, None)
     return dlg
 
 
@@ -59,13 +59,26 @@ def testTodoDialogValidationGatesOkButton(tempDir, mainWindow):
     dlg.deleteLater()
 
 
-def testTodoDialogAllDroppedDisablesOk(tempDir, mainWindow):
+def testTodoDialogAllDroppedIsAllowed(tempDir, mainWindow):
+    # Dropping every commit resets the branch to the base -- a real operation
     dlg = _dialog(mainWindow)
     for i in range(3):
         dlg.setAction(i, "drop")
+    assert dlg.okButton.isEnabled()
+    assert not dlg.errorLabel.isVisibleTo(dlg)
+    dlg.deleteLater()
+
+
+def testTodoDialogAllDroppedDisablesOkWithoutBase(tempDir, mainWindow):
+    # Rebasing from the root commit: dropping everything leaves nothing behind
+    dlg = _dialog(mainWindow, hasBase=False)
+    for i in range(3):
+        dlg.setAction(i, "drop")
     assert not dlg.okButton.isEnabled()
+    assert dlg.errorLabel.isVisibleTo(dlg)
     dlg.setAction(0, "pick")
     assert dlg.okButton.isEnabled()
+    assert not dlg.errorLabel.isVisibleTo(dlg)
     dlg.deleteLater()
 
 

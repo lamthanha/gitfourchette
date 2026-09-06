@@ -41,8 +41,13 @@ class RebaseTodoRow:
     squash chain this row belongs to. Empty = keep git's default."""
 
 
-def validateTodo(rowsOldestFirst: list[RebaseTodoRow]) -> str:
-    """Return an error message, or an empty string if the todo is executable."""
+def validateTodo(rowsOldestFirst: list[RebaseTodoRow], hasBase: bool = True) -> str:
+    """Return an error message, or an empty string if the todo is executable.
+
+    Dropping every row is legitimate when the rebase has a base commit: git
+    runs the drop lines and the branch simply lands on that base. Without one
+    (rebase --root) git leaves behind an empty-tree commit with no message
+    instead, so that combination is rejected."""
     anyKept = False
     for row in rowsOldestFirst:
         if row.action == "drop":
@@ -53,8 +58,9 @@ def validateTodo(rowsOldestFirst: list[RebaseTodoRow]) -> str:
         if row.action == "reword" and not row.message.strip():
             return _("Enter a new message for the reworded commit.")
         anyKept = True
-    if not anyKept:
-        return _("Every commit is dropped — there’s nothing left to do.")
+    if not anyKept and not hasBase:
+        return _("Every commit is dropped, and there’s no earlier commit to fall "
+                 "back on — this would wipe out the branch’s entire history.")
     return ""
 
 

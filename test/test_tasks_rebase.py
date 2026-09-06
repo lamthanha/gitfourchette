@@ -503,6 +503,62 @@ def testInteractiveRebaseDrop(tempDir, mainWindow):
     assert "three.txt" in headTree
 
 
+def testInteractiveRebaseDropEveryCommitInRange(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+    base = rw.repo.peel_commit(_commitIdByMessage(rw.repo, "ir: one")).parent_ids[0]
+
+    dlg = _openTodoDialog(rw, "ir: one")
+    for i in range(3):
+        dlg.setAction(i, "drop")
+    assert dlg.okButton.isEnabled()  # resetting the branch to the base is a real op
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.head_commit_id == base
+    headTree = rw.repo.peel_commit(rw.repo.head_commit_id).tree
+    for name in ("one.txt", "two.txt", "three.txt"):
+        assert name not in headTree
+
+
+def testInteractiveRebaseDropOnlyCommitBesideFlattenedMerge(tempDir, mainWindow):
+    # HEAD is a merge whose first-parent side adds nothing: the todo lists a
+    # single commit, and dropping it is still a real rewrite (the merge goes
+    # away, the branch lands on the base).
+    wd = unpackRepo(tempDir)
+    runShellScript(
+        """
+        git switch -c work master
+        echo one > one.txt
+        git add one.txt
+        git commit -m "ir: one"
+        git switch -c topic
+        git switch work
+        echo two > two.txt
+        git add two.txt
+        git commit -m "ir: two"
+        git switch topic
+        git merge --no-ff work -m "merge work into topic"
+        """,
+        wd)
+    rw = mainWindow.openRepo(wd)
+    base = _commitIdByMessage(rw.repo, "ir: one")
+
+    dlg = _openTodoDialog(rw, "ir: two")
+    assert [r.summary for r in dlg.rows()] == ["ir: two"]
+    assert dlg.mergeWarningLabel.isVisibleTo(dlg)
+    dlg.setAction(0, "drop")
+    assert dlg.okButton.isEnabled()
+    dlg.accept()
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.head_commit_id == base
+    assert rw.repo.branches.local["topic"].target == base
+    headTree = rw.repo.peel_commit(base).tree
+    assert "one.txt" in headTree
+    assert "two.txt" not in headTree
+
+
 def testInteractiveRebaseSquashWithEditedMessage(tempDir, mainWindow):
     wd = makeLinearHistory(tempDir)
     rw = mainWindow.openRepo(wd)
@@ -762,6 +818,22 @@ def testDropSelectedCommitsNonContiguous(tempDir, mainWindow):
     assert "two.txt" in headTree
     assert "one.txt" not in headTree
     assert "three.txt" not in headTree
+
+
+def testDropSelectedCommitsCoveringWholeRange(tempDir, mainWindow):
+    wd = makeLinearHistory(tempDir)
+    rw = mainWindow.openRepo(wd)
+    base = rw.repo.peel_commit(_commitIdByMessage(rw.repo, "ir: one")).parent_ids[0]
+
+    # Rows 1..3 == every commit on 'work': the branch falls back to the base
+    qlvClickNthRow(rw.graphView, 1)
+    qlvClickNthRow(rw.graphView, 3, modifier=Qt.KeyboardModifier.ShiftModifier)
+    triggerContextMenuAction(rw.graphView.viewport(), r"drop 3 commits")
+    acceptQMessageBox(rw, r"drop.+3.+commits")
+
+    assert rw.repo.state() == RepositoryState.NONE
+    assert rw.repo.head_commit_id == base
+    assert rw.repo.branches.local["work"].target == base
 
 
 def testSquashDisabledForNonContiguousSelection(tempDir, mainWindow):
