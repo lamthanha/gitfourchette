@@ -400,10 +400,17 @@ class GitDriver(QProcess):
     def formatExitCode(self) -> str:
         code = self.exitCode()
 
+        # Only a process that was actually KILLED by a signal carries a signal
+        # number in exitCode() (Qt reports CrashExit for those). A process that
+        # exits normally with a small status must never be dressed up as a
+        # signal: git declining to do something exits 1, which is not SIGHUP.
+        killed = self.exitStatus() == QProcess.ExitStatus.CrashExit
+
         if FLATPAK and code > 128 and self.program() == "flatpak-spawn":
-            # flatpak-spawn may shift SIG numbers by 128
-            # (for example: 143-128=15, a.k.a. SIGTERM)
+            # flatpak-spawn relays a killed child as a NORMAL exit with the
+            # SIG number shifted by 128 (for example: 143-128=15, SIGTERM).
             codeForName = code - 128
+            killed = True
         else:
             codeForName = code
 
@@ -416,11 +423,12 @@ class GitDriver(QProcess):
             else:
                 return f"{code}"
 
-        try:
-            s = signal.Signals(codeForName)
-            return f"{code} ({s.name})"
-        except ValueError:
-            pass
+        if killed:
+            try:
+                s = signal.Signals(codeForName)
+                return f"{code} ({s.name})"
+            except ValueError:
+                pass
 
         return f"{code}"
 
