@@ -1007,6 +1007,11 @@ def testFastForwardBranchHeldByDirtyWorktreeSurfacesGitError(tempDir, mainWindow
     # Honest git error -- NOT the misleading "divergent" dialog
     qmb = findQMessageBox(rw, r"overwritten|local changes|untracked")
     assert "divergent" not in qmb.text().lower()
+    # ...and it must say WHOSE local changes. git ran in DirtyWT, so "your
+    # local changes" is about that working directory, not this tab's (which
+    # is clean) -- without the attribution the message reads as nonsense.
+    assert "DirtyWT" in qmb.text()
+    assert "wtbranch" in qmb.text()
     qmb.accept()
     assert rw.repo.branches["wtbranch"].target == oldTarget
     assert readFile(os.path.join(dirty, "master.txt")).decode() == "conflicting local content\n"

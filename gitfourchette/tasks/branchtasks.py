@@ -571,6 +571,7 @@ class FastForwardBranch(RepoTask):
         # that worktree has conflicting local changes. (An ff merge never
         # fires an editor, so GIT_NO_EDITOR isn't needed here.)
         workdir = ""
+        holdingWt = None
         if branch.shorthand == self.repoModel.homeBranch:
             self.epilog.effects |= TaskEffects.Head
             args = ["merge", "--ff-only", "--progress", branch.upstream_name]
@@ -595,7 +596,17 @@ class FastForwardBranch(RepoTask):
             # any git failure at this point (e.g. the held worktree has
             # conflicting local changes) must surface git's own words instead
             # of a misleading "branches are divergent" dialog.
-            raise AbortTask(driver.htmlErrorText())
+            subtitle = ""
+            if holdingWt is not None:
+                # git ran in ANOTHER worktree, so its stderr talks about a
+                # working directory the user can't see from this tab. Say so,
+                # or "your local changes" reads as nonsense next to a clean
+                # Working Directory (0).
+                subtitle = _("Branch {0} is checked out in worktree {1}, so git ran there. "
+                             "Any local changes reported below are that worktree’s, "
+                             "not this tab’s.",
+                             bquo(branch.shorthand), bquo(worktreeName(holdingWt)))
+            raise AbortTask(driver.htmlErrorText(subtitle))
 
         return False
 
