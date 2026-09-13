@@ -19,6 +19,12 @@ from gitfourchette.toolbox import *
 class BlameGutter(CodeGutter):
     model: BlameModel
 
+    AuthorColumnMinChars = 8
+    "Author column never narrower than this many 'M's."
+
+    AuthorColumnMaxChars = 24
+    "Author column never wider than this many 'M's, however long a name gets."
+
     def __init__(self, parent):
         super().__init__(parent)
 
@@ -34,6 +40,7 @@ class BlameGutter(CodeGutter):
         self.installEventFilter(self)
 
         self.columnMetrics = []
+        self.cachedAuthorWidth = -1
         self.preferredWidth = 0
         self.lineHeight = 12
 
@@ -47,6 +54,7 @@ class BlameGutter(CodeGutter):
         self.refreshMetrics()
 
     def syncFont(self, codeFont: QFont):
+        self.cachedAuthorWidth = -1
         pointSize = codeFont.pointSizeF()
         codeFont = self.font()
         codeFont.setPointSizeF(pointSize)
@@ -59,7 +67,7 @@ class BlameGutter(CodeGutter):
         maxLineNumber = self.codeView.blockCount()
 
         dateWidth = fontMetrics.horizontalAdvance("2000-00-00 ")
-        authorWidth = fontMetrics.horizontalAdvance("M" * 8)
+        authorWidth = self.measureAuthorColumn()
         lnWidth = fontMetrics.horizontalAdvance(" " + "0" * len(str(maxLineNumber)))
 
         self.columnMetrics = []
@@ -85,6 +93,35 @@ class BlameGutter(CodeGutter):
         self.freshColor.setAlphaF(.6 if isDarkTheme(self.palette()) else .8)
         self.unknownColor = QColor(colors.fuchsia)
         self.unknownColor.setAlphaF(.4 if isDarkTheme(self.palette()) else .6)
+
+    def measureAuthorColumn(self) -> int:
+        """
+        Width required to spell out the widest author name occurring anywhere
+        in the file's history. Sizing to the entire history (rather than to the
+        current revision) keeps the code from shifting sideways as the user
+        scrubs through revisions.
+        """
+        if self.cachedAuthorWidth >= 0:
+            return self.cachedAuthorWidth
+
+        fontMetrics = self.fontMetrics()
+        width = fontMetrics.horizontalAdvance("M" * self.AuthorColumnMinChars)
+
+        model = self.model
+        if model is None:  # Not hooked up to a model yet - don't cache this
+            return width
+
+        for revision in model.revList.sequence:
+            if revision.commitId == UC_FAKEID:
+                name = _("(Uncommitted)")
+            else:
+                sig = model.repo.peel_commit(revision.commitId).author
+                name = abbreviatePerson(sig, AuthorDisplayStyle.LastName)
+            width = max(width, fontMetrics.horizontalAdvance(name))
+
+        width = min(width, fontMetrics.horizontalAdvance("M" * self.AuthorColumnMaxChars))
+        self.cachedAuthorWidth = width
+        return width
 
     def calcWidth(self) -> int:
         return self.preferredWidth

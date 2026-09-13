@@ -334,6 +334,40 @@ def testBlameGutterToolTips(blameWindow):
         summonToolTip(blameWindow.textEdit.gutter, beyondLastLine)
 
 
+def testBlameGutterFitsWidestAuthorInHistory(tempDir, mainWindow):
+    # Far wider than the 8 'M' widths that the author column used to reserve
+    longLastName = "Featherstonehaugh"
+
+    wd = unpackRepo(tempDir, "testrepoformerging")
+    runShellScript(
+        f"export GIT_AUTHOR_NAME='Bartholomew {longLastName}'\n"
+        'export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"\n'
+        f"echo 'hallo welt' >> {BlameFixture.path}\n"
+        f"git add {BlameFixture.path}\n"
+        "git commit -m 'Say hello in German'",
+        wd)
+
+    rw = mainWindow.openRepo(wd)
+    rw.jump(NavLocator.inCommit(rw.repo.head_commit_id, BlameFixture.path), check=True)
+
+    triggerMenuAction(mainWindow.menuBar(), "view/blame")
+    blameWindow = findWindow("blame", BlameWindow)
+    waitUntilTrue(blameWindow.isActiveWindow)
+
+    gutter = blameWindow.textEdit.gutter
+    nameWidth = gutter.fontMetrics().horizontalAdvance(longLastName)
+
+    # The author column must have room for the whole name, not an elided stub
+    authorColumnWidth = gutter.columnMetrics[1][1]
+    assert authorColumnWidth >= nameWidth
+
+    # Scrubbing to a revision predating that author mustn't shift the code around
+    qcbSetIndex(blameWindow.scrubber, "say hello in spanish")
+    assert gutter.columnMetrics[1][1] == authorColumnWidth
+
+    blameWindow.close()
+
+
 def testBlameNewFile(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
 
