@@ -1005,3 +1005,94 @@ def testStagedFileListFilterUpdatesHeaderCounts(tempDir, mainWindow):
 
     QTest.keyPress(rw.stagedFiles.searchBar.lineEdit, Qt.Key.Key_Escape)
     assert header.text() == f"Staged ({baselineTotal})"
+
+
+def testCommittedFileListFilterUpdatesHeaderCounts(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    # A merge commit that touches 3 files: a/a1.txt, a/a2.txt, master.txt
+    oid = Oid(hex="83834a7afdaa1a1260568567f6ad90020389f664")
+    rw.jump(NavLocator.inCommit(oid, "a/a1.txt"), check=True)
+    committed = rw.committedFiles
+    header = rw.diffArea.committedHeader
+
+    baselineTotal = committed.flModel.totalRowCount
+    assert baselineTotal == 3
+    assert header.text().startswith(f"{baselineTotal} change")
+
+    committed.searchBar.popUp()
+    QTest.keyClicks(committed.searchBar.lineEdit, "a2.txt")
+    assert qlvGetRowData(committed) == ["a/a2.txt"]
+    assert header.text().startswith(f"1/{baselineTotal} change")
+
+    QTest.keyPress(committed.searchBar.lineEdit, Qt.Key.Key_Escape)
+    assert header.text().startswith(f"{baselineTotal} change")
+
+
+def testCommittedFileListFilterDoesNotClaimCommitIsEmpty(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+
+    oid = Oid(hex="83834a7afdaa1a1260568567f6ad90020389f664")
+    rw.jump(NavLocator.inCommit(oid, "a/a1.txt"), check=True)
+    committed = rw.committedFiles
+    total = committed.flModel.totalRowCount
+
+    # Filter out every file of a commit that is NOT empty
+    committed.searchBar.popUp()
+    QTest.keyClicks(committed.searchBar.lineEdit, "nomatchwhatsoever")
+    QTest.qWait(0)
+    assert qlvGetRowData(committed) == []
+
+    # The header must still report the commit's real file count,
+    # and the app must not pretend the commit is empty.
+    assert rw.diffArea.committedHeader.text().startswith(f"0/{total} change")
+    assert "commit is empty" not in rw.specialDiffView.toPlainText().lower()
+
+    # Walking to another (also non-empty) commit while the filter is up is how
+    # the bug showed up in practice: the filtered-out list made showCommit()
+    # declare the commit empty.
+    otherOid = Oid(hex="c070ad8c08840c8116da865b2d65593a6bb9cd2a")  # 2 files
+    rw.jump(NavLocator.inCommit(otherOid), check=False)
+    QTest.qWait(0)
+    assert qlvGetRowData(committed) == []
+    assert rw.diffArea.committedHeader.text().startswith("0/2 change")
+    assert "commit is empty" not in rw.specialDiffView.toPlainText().lower()
+
+    # Bouncing through the workdir and back must agree with the above
+    rw.jump(NavLocator.inWorkdir(), check=False)
+    QTest.qWait(0)
+    rw.jump(NavLocator.inCommit(oid), check=False)
+    QTest.qWait(0)
+    assert qlvGetRowData(committed) == []
+    assert rw.diffArea.committedHeader.text().startswith(f"0/{total} change")
+    assert "commit is empty" not in rw.specialDiffView.toPlainText().lower()
+
+
+def testCommittedFileListEmptyCommitStillReportsEmpty(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    with RepoContext(wd) as repo:
+        repo.create_commit_on_head("EMPTY COMMIT", TEST_SIGNATURE, TEST_SIGNATURE)
+    rw = mainWindow.openRepo(wd)
+
+    rw.jump(NavLocator.inCommit(rw.repo.head_commit_id), check=True)
+    assert qlvGetRowData(rw.committedFiles) == []
+    assert "commit is empty" in rw.specialDiffView.toPlainText().lower()
+
+
+def testWorkdirFileListFilterDoesNotClaimWorkdirIsClean(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/apple.txt", "a")
+    rw = mainWindow.openRepo(wd)
+
+    rw.dirtyFiles.searchBar.popUp()
+    QTest.keyClicks(rw.dirtyFiles.searchBar.lineEdit, "nomatchwhatsoever")
+    QTest.qWait(0)
+    assert qlvGetRowData(rw.dirtyFiles) == []
+
+    rw.jump(NavLocator.inWorkdir(), check=False)
+    QTest.qWait(0)
+    special = rw.specialDiffView.toPlainText().lower()
+    assert "working directory is clean" not in special
+    assert "no files match the filter" in special

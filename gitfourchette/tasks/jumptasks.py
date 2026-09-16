@@ -311,21 +311,31 @@ class Jump(RepoTask):
             repoModel.workdirStale = False
             repoModel.workdirStatusReady = True
 
+        # Fork: judge emptiness on the unfiltered file counts — the search bar’s
+        # filter must not make a dirty workdir look clean (see showCommit).
+        numDirty = rw.dirtyFiles.flModel.totalRowCount
+        numStaged = rw.stagedFiles.flModel.totalRowCount
+
         # If jumping to generic workdir context, find a concrete context
         if locator.context == NavContext.WORKDIR:
-            if rw.dirtyFiles.isEmpty() and not rw.stagedFiles.isEmpty():
+            if numDirty == 0 and numStaged != 0:
                 locator = locator.replace(context=NavContext.STAGED)
             else:
                 locator = locator.replace(context=NavContext.UNSTAGED)
             locator = rw.navHistory.refine(locator)
 
         # Early out if workdir is clean
-        if rw.dirtyFiles.isEmpty() and rw.stagedFiles.isEmpty():
+        if numDirty == 0 and numStaged == 0:
             locator = locator.replace(path="")
             sde = SpecialDiffError(
                 _("The working directory is clean."),
                 _("There aren’t any changes to commit."))
             raise Jump.Result(locator, sde)
+
+        # Fork: early out if the filter hides every change in a dirty workdir
+        if rw.dirtyFiles.isEmpty() and rw.stagedFiles.isEmpty():
+            locator = locator.replace(path="")
+            raise Jump.Result(locator, self.filteredOutError(numDirty + numStaged))
 
         assert not locator.hasFlags(NavFlags.FuzzyPath), "FuzzyPath should not occur in the workdir"
 
@@ -399,6 +409,15 @@ class Jump(RepoTask):
             raise NotImplementedError(f"Unsupported special locator: {special}")
 
         raise Jump.Result(locator, sde)
+
+    @staticmethod
+    def filteredOutError(numHidden: int) -> SpecialDiffError:
+        # Fork: the search bar filters the file lists, so it can narrow a
+        # non-empty list down to nothing. Say so instead of going blank.
+        return SpecialDiffError(
+            _("No files match the filter."),
+            _n("{n} file is hidden by the file list filter.",
+               "{n} files are hidden by the file list filter.", numHidden))
 
     def showCommit(self, locator: NavLocator) -> Generator[FlowControlToken, None, NavLocator]:
         """
@@ -480,20 +499,27 @@ class Jump(RepoTask):
                 flv.clear()
                 flv.setCommitLocator(locator)
                 flv.setContents(deltas)
-                numChanges = flv.model().rowCount()
 
-            # Set header text
-            headerText = toLengthVariants(_n("{n} change:|{n} ch.:", "{n} changes:|{n} ch.:", numChanges))
-            area.committedHeader.setText(headerText)
+            # Fork: header text is now DiffArea's job (also drives the live filter path).
+            area.refreshFileHeaders()
             area.committedHeader.setToolTip("<p>" + escape(summary).replace("\n", "<br>"))
 
-        # Early out if the commit is empty
-        if flv.isEmpty():
+        # Early out if the commit is empty.
+        # Fork: totalRowCount ignores the search bar's filter. A commit whose
+        # files are merely filtered out is NOT an empty commit (isEmpty() only
+        # reflects the filtered view).
+        numChanges = flv.flModel.totalRowCount
+        if numChanges == 0:
             locator = locator.replace(path="")
             sde = SpecialDiffError(
                 _("This commit is empty."),
                 _("Commit {0} doesn’t affect any files.", hquo(shortHash(locator.commit))))
             raise Jump.Result(locator, sde)
+
+        # Fork: early out if the filter hides every file of a non-empty commit
+        if flv.isEmpty():
+            locator = locator.replace(path="")
+            raise Jump.Result(locator, self.filteredOutError(numChanges))
 
         # Try to resolve a fuzzy path
         if locator.path and locator.hasFlags(NavFlags.FuzzyPath):

@@ -157,6 +157,11 @@ class FileList(QListView):
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)  # prevent editing text after double-clicking
         self.setUniformItemSizes(True)  # potential perf boost with many files
 
+        # Fork: SearchBar._installProvider() freezes the provider as it registers
+        # it, i.e. before the line below that names the bar. FileListFilter.freeze
+        # looks the bar up to tell an explicit hide from an ancestor-driven one.
+        self.searchBar = None
+
         searchProvider = FileListFilter(self)
         searchProvider.dataRole = FileListModel.Role.FilePath
 

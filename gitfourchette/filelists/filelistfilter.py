@@ -31,9 +31,13 @@ class FileListFilter(ItemViewSearchProvider):
         self.fileList.flModel.setFilterTerm(self.term())
 
     def freeze(self, frozen: bool):
-        # SearchBar freezes the provider when the bar hides (Esc) and thaws it
-        # on show. A hidden bar must always mean "no filter"; on re-show, the
-        # bar's showEvent reevaluates the term and the filter reapplies.
+        # SearchBar freezes the provider on every hideEvent. A bar the user
+        # explicitly dismissed (Esc/close) must mean "no filter". But a bar
+        # hidden along with its pane — the committed file list giving way to
+        # the working directory, say — is still up as far as the user is
+        # concerned, and dropping the filter there only means the bar's
+        # showEvent reapplies it later, in the middle of an unrelated jump.
         super().freeze(frozen)
-        if frozen:
+        searchBar = self.fileList.searchBar
+        if frozen and (searchBar is None or searchBar.isHidden()):
             self.fileList.flModel.setFilterTerm("")

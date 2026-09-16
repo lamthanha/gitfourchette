@@ -52,6 +52,7 @@ class DiffArea(QWidget):
         # Fork: keep header counts live (filter narrowing fires modelReset).
         self.dirtyFiles.flModel.modelReset.connect(self.refreshFileHeaders)
         self.stagedFiles.flModel.modelReset.connect(self.refreshFileHeaders)
+        self.committedFiles.flModel.modelReset.connect(self.refreshFileHeaders)
 
         diffContainer = self._makeDiffContainer(repoModel)
 
@@ -376,6 +377,19 @@ class DiffArea(QWidget):
             self.stagedHeader.setText(_("Staged ({0}/{1})", nStaged, nStagedTotal))
         else:
             self.stagedHeader.setText(_n("Staged ({n})", "Staged ({n})", nStaged))
+
+        # The committed header is owned by this method too (upstream set it from
+        # JumpTask.showCommit): the filter can narrow the list at times unrelated
+        # to a commit switch, e.g. when the search bar is re-shown along with the
+        # committed pane after a detour through the working directory.
+        committedModel = self.committedFiles.flModel
+        nCommitted = committedModel.rowCount()
+        nCommittedTotal = committedModel.totalRowCount
+        if nCommitted != nCommittedTotal:
+            committedText = _("{0}/{1} changes:|{0}/{1} ch.:", nCommitted, nCommittedTotal)
+        else:
+            committedText = _n("{n} change:|{n} ch.:", "{n} changes:|{n} ch.:", nCommitted)
+        self.committedHeader.setText(toLengthVariants(committedText))
 
     # -------------------------------------------------------------------------
     # Fork: Shift-modifier button variants (Fork.dev-style)

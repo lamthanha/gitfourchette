@@ -181,6 +181,7 @@ class FileListModel(QAbstractListModel):
         self.navContext = navContext
         self.navLocator = NavLocator.Empty
         self._rebuildingFilteredRows = False
+        self._filterTerm = ""  # Fork: owned by the search bar; clear() leaves it alone
         self.clear()
 
     @property
@@ -197,7 +198,10 @@ class FileListModel(QAbstractListModel):
         self.deltas = []
         self.fileRows = {}
         self._allDeltas = []
-        self._filterTerm = ""
+        # Fork: deliberately keep _filterTerm. The filter belongs to the search
+        # bar, not to the contents: clearing it here would let setContents()
+        # publish an unfiltered list that the bar then re-narrows out of band,
+        # after JumpTask already sized up the list and vetted its locator.
         self.highlightedCounterpartRow = -1
         self.navLocator = NavLocator.Empty
         self.modelReset.emit()
@@ -218,15 +222,10 @@ class FileListModel(QAbstractListModel):
         if self._rebuildingFilteredRows:
             # Fork: beginResetModel() below emits modelAboutToBeReset, which
             # SearchBar.reevaluateSearchTerm (connected in FileList.__init__)
-            # handles synchronously. If a FileList's clear() ran just before
-            # setContents() (e.g. CommittedFiles, which clears/repopulates on
-            # every commit switch), _filterTerm may be transiently out of sync
-            # with the search bar's real term, so reevaluation calls back into
-            # setFilterTerm() with a genuinely different term while we're still
-            # inside the outer beginResetModel()/endResetModel() bracket. Bail
-            # out of the inner call instead of nesting model resets — the outer
-            # call (still running) will pick up the freshly updated
-            # _filterTerm on its own.
+            # handles synchronously. Should that reevaluation ever come back
+            # with a different term, bail out of the inner call instead of
+            # nesting model resets — the outer call is still running and picks
+            # up the freshly updated _filterTerm on its own.
             return
         self._rebuildingFilteredRows = True
         try:
