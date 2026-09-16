@@ -11,7 +11,7 @@ import pytest
 from .util import *
 
 from gitfourchette.syntax import LexJobCache, LexJob
-from gitfourchette.nav import NavLocator
+from gitfourchette.nav import NavLocator, NavFlags
 
 SAMPLE_CODE = """\
 '''
@@ -282,3 +282,52 @@ def testDiffViewSurvivesFileGrowingDuringLoad(tempDir, mainWindow):
         sys.excepthook = oldHook
 
     assert not errors, f"highlighter raised: {errors}"
+
+
+@requiresPygments
+def testLexJobCacheRejectsContentThatDoesNotMatchItsKey(tempDir, mainWindow):
+    """
+    LoadPatch keys the lex job on the blob hash that `git diff` wrote into the
+    patch, but reads the bytes to lex from the workdir afterwards. If the file
+    changed in between, that tokenization must not enter the cache under a hash
+    it doesn't match -- it would be served again later, when the file really
+    does have those contents.
+    """
+    from gitfourchette.gitdriver import GitDeltaFile
+
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/hello.py", SAMPLE_CODE * 20)
+    rw = mainWindow.openRepo(wd)
+    loc = NavLocator.inUnstaged("hello.py")
+
+    # Stand in for the file being rewritten between `git diff` and read()
+    realRead = GitDeltaFile.read
+
+    def shortRead(self, repo, maxSize=-1):
+        if self.path == "hello.py":
+            return b"x = 1\n"
+        return realRead(self, repo, maxSize)
+
+    # Drop the valid job that opening the repo already lexed, so that the first
+    # tokenization of this blob hash is the mismatched one
+    LexJobCache.clear()
+
+    GitDeltaFile.read = shortRead
+    try:
+        rw.jump(loc.withExtraFlags(NavFlags.ForceRecreateDocument), check=True)
+        QTest.qWait(0)
+        blobHash = rw.diffView.currentDelta.new.id
+        assert blobHash
+        assert blobHash not in LexJobCache.cache, "cached a tokenization that doesn't match its key"
+    finally:
+        GitDeltaFile.read = realRead
+
+    # With the real contents back, the diff must get a token map that covers it
+    rw.jump(loc.withExtraFlags(NavFlags.ForceRecreateDocument), check=True)
+    QTest.qWait(0)
+    job = rw.diffView.highlighter.newLexJob
+    assert job is not None
+    while not job.lexingComplete:
+        QTest.qWait(0)
+    maxDocLine = max(ld.newLineNo for ld in rw.diffView.currentDiffDocument.lineData)
+    assert maxDocLine <= max(job.hqTokenMap)

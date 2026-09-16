@@ -7,6 +7,8 @@
 import logging
 from collections.abc import Generator
 
+from pygit2 import hash as hashObject
+
 from gitfourchette import settings
 from gitfourchette.diffview.diffdocument import DiffDocument
 from gitfourchette.forms.repostub import RepoStub
@@ -434,6 +436,19 @@ class LoadPatch(RepoTask):
             pass
 
         data = file.read(self.repo)
+
+        # The workdir is mutable, so file.read() may have picked up a different
+        # revision of the file than the one `git diff` hashed into the patch.
+        # Tokens that don't describe the content behind `key` must never enter
+        # the cache: they would be served again the next time the file really
+        # does have those contents. Skip highlighting instead; the refresh that
+        # follows the file's modification will produce a consistent pair.
+        # (Not checkable for LFS, where the data is the object's contents while
+        # the key is the pointer blob, nor for object formats wider than SHA-1.)
+        if key == file.id and not file.lfs and len(key) == 40 and str(hashObject(data)) != key:
+            logger.debug(f"Not lexing {file.path}: changed since it was diffed")
+            return None
+
         job = LexJob(lexer, data, key)
 
         assert job.fileKey == key
