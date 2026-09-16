@@ -4,6 +4,8 @@
 # For full terms, see the included LICENSE file.
 # -----------------------------------------------------------------------------
 
+import sys
+
 import pytest
 
 from .util import *
@@ -227,3 +229,56 @@ def testWhitespaceHighlighting(tempDir, mainWindow):
         for span in formatRanges:
             token = block.text()[span.start: span.start + span.length]
             assert token == space
+
+
+@requiresPygments
+def testLexJobToleratesLinesBeyondLexedFile():
+    """
+    The patch on screen and the bytes handed to the lexer are two separate
+    reads of the same workdir file. If the file is rewritten between those two
+    reads, the diff document can reference lines that were never lexed. The
+    lex job must degrade to no highlighting there instead of raising KeyError
+    out of QSyntaxHighlighter.highlightBlock().
+    """
+    from gitfourchette.syntax import LexerCache
+
+    lexer = LexerCache.getLexerFromPath("hello.py", False)
+    job = LexJob(lexer, b"x = 1\n", "dummykey")
+    while not job.lexingComplete:
+        job.lexChunk()
+
+    assert job.tokens(1, "x = 1")  # a line we did lex
+    assert job.tokens(148, "y = 2") == []  # far beyond the lexed file
+
+
+@requiresPygments
+def testDiffViewSurvivesFileGrowingDuringLoad(tempDir, mainWindow):
+    """
+    Reproduces the crash: an untracked file is rewritten longer while its diff
+    is being loaded, so the diff document outruns the lex job's token map.
+    """
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/hello.py", SAMPLE_CODE * 20)
+    rw = mainWindow.openRepo(wd)
+    rw.jump(NavLocator.inUnstaged("hello.py"), check=True)
+    QTest.qWait(0)
+
+    highlighter = rw.diffView.highlighter
+    assert highlighter.newLexJob is not None
+
+    # Stand in for the shorter copy of the file that the lexer got to read
+    staleJob = LexJob(highlighter.newLexJob.lexer, b"x = 1\n", "stalekey")
+    while not staleJob.lexingComplete:
+        staleJob.lexChunk()
+    highlighter.newLexJob = staleJob
+
+    errors = []
+    oldHook = sys.excepthook
+    sys.excepthook = lambda *args: errors.append(args)
+    try:
+        highlighter.rehighlight()
+        QTest.qWait(0)
+    finally:
+        sys.excepthook = oldHook
+
+    assert not errors, f"highlighter raised: {errors}"

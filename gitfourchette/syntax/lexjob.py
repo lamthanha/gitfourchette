@@ -60,7 +60,12 @@ class LexJob(QObject):
 
     def tokens(self, lineNumber: int, fallbackText: str) -> list[tuple[Token, int]]:
         if self.lexingComplete or self.currentLine > lineNumber:
-            return self.hqTokenMap[lineNumber]
+            # The patch on screen and the bytes we lexed are two separate reads
+            # of the same file. If a workdir file was rewritten between those
+            # reads, the diff document may run past the last line we lexed.
+            # Leave those lines unhighlighted rather than raising KeyError out
+            # of QSyntaxHighlighter.highlightBlock().
+            return self.hqTokenMap.get(lineNumber, LexJob._EmptyTokenization)
 
         # Lex job hasn't reached this line yet.
         # Schedule high-quality lexing up to this line.
