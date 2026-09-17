@@ -163,6 +163,7 @@ class Prefs(PrefsFile):
     tabCloseButton              : bool                  = True
     expandingTabs               : bool                  = True
     autoHideTabs                : bool                  = False
+    tabListColorDots            : bool                  = True
     tabColorBindings            : dict[str, str]        = dataclasses.field(default_factory=dict)
     tabColorOverrides           : dict[str, str]        = dataclasses.field(default_factory=dict)
 

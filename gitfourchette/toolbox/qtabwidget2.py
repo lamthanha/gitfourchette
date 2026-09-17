@@ -266,6 +266,10 @@ class QTabWidget2(QWidget):
         self.tabs.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tabs.customContextMenuRequested.connect(self.onCustomContextMenuRequested)
 
+        self.overflowMenuBuilder = None
+        """Fork: optional callable(menu) filling the overflow menu
+        (see taboverflow.py). None falls back to a flat list of tabs."""
+
         self.overflowMenu = QMenu(self)
         self.overflowMenu.setObjectName("QTW2OverflowMenu")
         self.overflowMenu.setToolTipsVisible(True)
@@ -441,12 +445,15 @@ class QTabWidget2(QWidget):
 
     def onOverflowButtonClicked(self):
         self.overflowMenu.clear()
-        for i in range(self.count()):
-            action = QAction(self.overflowMenu)
-            action.setText(self.tabs.tabText(i))
-            action.setToolTip(self.tabs.tabToolTip(i))
-            action.triggered.connect(lambda _dummy, j=i: self.setCurrentIndex(j))
-            self.overflowMenu.addAction(action)
+        if self.overflowMenuBuilder is not None:
+            self.overflowMenuBuilder(self.overflowMenu)
+        else:
+            for i in range(self.count()):
+                action = QAction(self.overflowMenu)
+                action.setText(self.tabs.tabText(i))
+                action.setToolTip(self.tabs.tabToolTip(i))
+                action.triggered.connect(lambda _dummy, j=i: self.setCurrentIndex(j))
+                self.overflowMenu.addAction(action)
 
         pos = self.mapToGlobal(self.overflowButton.pos() + self.overflowButton.rect().bottomLeft())
         self.overflowMenu.popup(pos)

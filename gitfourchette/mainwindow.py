@@ -16,6 +16,7 @@ from typing import Literal
 
 from gitfourchette import settings
 from gitfourchette import tabcolors
+from gitfourchette import taboverflow
 from gitfourchette import tasks
 from gitfourchette.application import GFApplication
 from gitfourchette.codeview.codeview import CodeView
@@ -78,6 +79,7 @@ class MainWindow(QMainWindow):
         self.resize(initialSize)
 
         self.tabs = QTabWidget2(self)
+        taboverflow.install(self)  # Fork: group linked worktrees in the overflow menu
         self.tabs.currentWidgetChanged.connect(self.onTabCurrentWidgetChanged)
         self.tabs.tabCloseRequested.connect(self.closeTab)
         self.tabs.tabContextMenuRequested.connect(self.onTabContextMenu)

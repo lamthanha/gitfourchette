@@ -112,3 +112,98 @@ def testTabSpecialClick(tempDir, mainWindow, click, action):
             raise NotImplementedError(f"unknown action {action}")
 
     assert tabBar.count() == (0 if action == "close" else 2)
+
+
+# -----------------------------------------------------------------------------
+# Forkette extension tests — worktree grouping in the overflow menu.
+
+def summonOverflowMenu(mainWindow) -> QMenu:
+    mainWindow.tabs.overflowButton.click()
+    menu = mainWindow.findChild(QMenu, "QTW2OverflowMenu")
+    assert menu is not None
+    return menu
+
+
+def _setUpWorktrees(tempDir, *names, repoName="BeansApp") -> tuple[str, list[str]]:
+    import os
+    wd = unpackRepo(tempDir, renameTo=repoName)
+    parent = os.path.dirname(os.path.normpath(wd))
+    paths = []
+    for name in names:
+        runShellScript(f"git worktree add -b wt-{name.lower()} ../{name}", wd)
+        paths.append(os.path.join(parent, name))
+    return wd, paths
+
+
+def testTabOverflowGroupsWorktreesUnderMainWorktree(tempDir, mainWindow):
+    wd, (alpha, bravo) = _setUpWorktrees(tempDir, "WtAlpha", "WtBravo")
+
+    # Open the main worktree between its two linked worktrees: the main
+    # worktree must still head the group.
+    mainWindow.openRepo(alpha)
+    mainWindow.openRepo(wd)
+    mainWindow.openRepo(bravo)
+    QTest.qWait(1)
+
+    menu = summonOverflowMenu(mainWindow)
+    try:
+        # Header drops the [M] marker - the indentation conveys it now
+        assert [a.text() for a in menu.actions()] == [
+            "BeansApp", "    ↳ WtAlpha", "    ↳ WtBravo"]
+        assert not menu.actions()[0].font().italic()
+
+        mainWindow.tabs.setCurrentIndex(0)
+        triggerMenuAction(menu, "WtBravo")
+    finally:
+        menu.close()
+
+    assert mainWindow.tabs.currentIndex() == 2
+    assert mainWindow.currentRepoWidget().workdir == os.path.normpath(bravo)
+
+
+def testTabOverflowGhostHeaderOpensMainWorktree(tempDir, mainWindow):
+    wd, (alpha,) = _setUpWorktrees(tempDir, "WtAlpha")
+    other = unpackRepo(tempDir, renameTo="TypingGame")
+
+    # Only the linked worktree is open, not the main worktree it belongs to
+    mainWindow.openRepo(alpha)
+    mainWindow.openRepo(other)
+    QTest.qWait(1)
+
+    menu = summonOverflowMenu(mainWindow)
+    try:
+        assert [a.text() for a in menu.actions()] == [
+            "BeansApp", "    ↳ WtAlpha", "TypingGame"]
+
+        ghost = findMenuAction(menu, "^BeansApp$")
+        assert ghost.isEnabled(), "ghost header must stay clickable"
+        assert ghost.font().italic(), "ghost header must look de-emphasized"
+        ghost.trigger()
+    finally:
+        menu.close()
+    QTest.qWait(1)
+
+    assert mainWindow.tabs.count() == 3
+    assert mainWindow.currentRepoWidget().workdir == os.path.normpath(wd)
+
+
+def testTabOverflowGhostHeaderDisabledForBareRepo(tempDir, mainWindow):
+    wd = unpackRepo(tempDir, renameTo="BeansApp")
+    parent = os.path.dirname(os.path.normpath(wd))
+    runShellScript("git clone --bare . ../Beans.git", wd)
+    bare = os.path.join(parent, "Beans.git")
+    runShellScript("git worktree add -b wt-bare ../WtBare master", bare)
+    other = unpackRepo(tempDir, renameTo="TypingGame")
+
+    mainWindow.openRepo(os.path.join(parent, "WtBare"))
+    mainWindow.openRepo(other)
+    QTest.qWait(1)
+
+    menu = summonOverflowMenu(mainWindow)
+    try:
+        assert [a.text() for a in menu.actions()] == [
+            "Beans.git", "    ↳ WtBare", "TypingGame"]
+        # A bare repo can't be opened in a tab, so the header is inert
+        assert not findMenuAction(menu, "^Beans.git$").isEnabled()
+    finally:
+        menu.close()

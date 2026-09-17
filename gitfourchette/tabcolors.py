@@ -171,6 +171,12 @@ def _addStatusRow(menu: QMenu, workdir: str):
     menu.addSeparator()
 
 
+def setTabListColorDots(enabled: bool):
+    """Toggle the color dots in the tab list (broadcasts prefsChanged)."""
+    from gitfourchette.application import GFApplication
+    GFApplication.applyPrefs(tabListColorDots=enabled)
+
+
 def makeTabColorMenus(
         parentMenu: QMenu,
         workdir: str,
@@ -229,6 +235,14 @@ def makeTabColorMenus(
     noColor.triggered.connect(lambda: setBinding(""))
 
     repoMenu.addSeparator()
+
+    # Global switch for the dots in the tab list (the overflow menu), parked
+    # here because this is where the user manages colors in the first place.
+    dots = repoMenu.addAction(_("Show &Dots in Tab List"))
+    dots.setCheckable(True)
+    dots.setChecked(settings.prefs.tabListColorDots)
+    dots.triggered.connect(lambda checked: setTabListColorDots(checked))
+
     manage = repoMenu.addAction(_("&Manage Tab Colors…"))
     manage.triggered.connect(lambda: openSettings())
 

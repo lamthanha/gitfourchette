@@ -464,6 +464,7 @@ class TrTables:
             "tabCloseButton": _("Show tab close button"),
             "expandingTabs": _("Expand tabs to available width"),
             "autoHideTabs": _("Auto-hide tabs if only one repo is open"),
+            "tabListColorDots": _("Show color dots in the tab list"),
             "tabColorBindings": _("Repository tab colors"),
             "tabColorOverrides": _("Worktree tab colors"),
 

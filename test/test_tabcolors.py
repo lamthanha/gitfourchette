@@ -522,3 +522,116 @@ def testRemoveOverrideViaSettingsRevertsToInherited(tempDir, mainWindow):
     dlg.accept()
     assert settings.prefs.tabColorOverrides == {}
     assert _tabIconKey(mainWindow, 1) == _dotKey("green")  # back to inherited
+
+
+# -----------------------------------------------------------------------------
+# Color dots in the tab list (overflow menu)
+
+def _menuIconKey(action):
+    icon = action.icon()
+    return None if icon.isNull() else icon.cacheKey()
+
+
+def _overflowRows(mainWindow) -> list:
+    from .test_tabbar import summonOverflowMenu
+    menu = summonOverflowMenu(mainWindow)
+    rows = [(a.text(), _menuIconKey(a)) for a in menu.actions()]
+    menu.close()
+    return rows
+
+
+def testOverflowMenuShowsColorDots(tempDir, mainWindow):
+    _wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color: repository/red")
+
+    # The binding covers the whole family, so both rows carry the dot
+    rows = _overflowRows(mainWindow)
+    assert [key for _text, key in rows] == [_dotKey("red"), _dotKey("red")]
+
+
+def testOverflowMenuGhostHeaderShowsBindingColor(tempDir, mainWindow):
+    wd = unpackRepo(tempDir, renameTo="BeansApp")
+    runShellScript("git worktree add ../WtAlpha", wd)
+    linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "WtAlpha")
+    other = unpackRepo(tempDir, renameTo="TypingGame")
+
+    # Main worktree is NOT open; bind a color from the linked worktree's tab
+    mainWindow.openRepo(linked)
+    mainWindow.openRepo(other)
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color: repository/teal")
+
+    rows = _overflowRows(mainWindow)
+    assert [text for text, _key in rows] == ["BeansApp", "    ↳ WtAlpha", "TypingGame"]
+    assert rows[0][1] == _dotKey("teal"), "ghost header shows the color its tab would have"
+    assert rows[1][1] == _dotKey("teal")
+    assert rows[2][1] is None, "uncolored repo gets no dot"
+
+
+def testOverflowMenuUrgentIconWinsOverDot(tempDir, mainWindow):
+    from gitfourchette.toolbox import stockIcon
+    _wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color: repository/red")
+
+    mainWindow.tabs.setCurrentIndex(1)
+    mainWindow.tabs.requestAttention(0)
+
+    rows = _overflowRows(mainWindow)
+    assert rows[0][1] == stockIcon("urgent-tab").cacheKey()
+    assert rows[1][1] == _dotKey("red")
+
+
+def testOverflowMenuDotsCanBeTurnedOff(tempDir, mainWindow):
+    from gitfourchette.toolbox import stockIcon
+    _wd, _linked, _rwMain, _rwChild = _openMainAndLinkedWorktree(tempDir, mainWindow)
+
+    menu = mainWindow.generateTabContextMenu(0)
+    triggerMenuAction(menu, "tab color: repository/red")
+
+    GFApplication.applyPrefs(tabListColorDots=False)
+    assert [key for _text, key in _overflowRows(mainWindow)] == [None, None]
+
+    # Urgency isn't a color - it must still get through
+    mainWindow.tabs.setCurrentIndex(1)
+    mainWindow.tabs.requestAttention(0)
+    assert _overflowRows(mainWindow)[0][1] == stockIcon("urgent-tab").cacheKey()
+
+    # Tab bar dots are unaffected by this pref
+    assert _tabIconKey(mainWindow, 1) == _dotKey("red")
+
+
+def testTabContextMenuTogglesTabListDots(tempDir, mainWindow):
+    from gitfourchette import settings
+    wd = unpackRepo(tempDir)
+    mainWindow.openRepo(wd)
+
+    assert settings.prefs.tabListColorDots
+    menu = mainWindow.generateTabContextMenu(0)
+    action = findMenuAction(menu, "tab color/show dots in tab list")
+    assert action.isCheckable()
+    assert action.isChecked()
+    action.trigger()
+    assert not settings.prefs.tabListColorDots
+
+    # The checkbox reflects the new state next time the menu is built
+    menu = mainWindow.generateTabContextMenu(0)
+    assert not findMenuAction(menu, "tab color/show dots in tab list").isChecked()
+
+
+def testTabListDotsPrefInSettingsDialog(tempDir, mainWindow):
+    from gitfourchette import settings
+    wd = unpackRepo(tempDir)
+    mainWindow.openRepo(wd)
+
+    triggerMenuAction(mainWindow.menuBar(), "file/settings")
+    dlg = findQDialog(mainWindow, "settings")
+    checkBox: QCheckBox = dlg.findChild(QCheckBox, "prefctl_tabListColorDots")
+    assert checkBox is not None, "pref must show up in Settings automatically"
+    assert checkBox.isChecked()
+    checkBox.setChecked(False)
+    dlg.accept()
+    assert not settings.prefs.tabListColorDots
