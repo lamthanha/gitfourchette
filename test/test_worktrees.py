@@ -156,7 +156,7 @@ def testWorktreesListedFromLinkedWorktreeTab(tempDir, mainWindow):
 
 def testOpenWorktreeInNewTab(tempDir, mainWindow):
     from gitfourchette.sidebar.sidebarmodel import SidebarItem
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     assert mainWindow.tabs.count() == 1
 
     linkedNode = rw.sidebar.findNode(
@@ -292,7 +292,7 @@ def _worktreeNodeByPath(rw, path):
 
 def testRemoveWorktreeClean(tempDir, mainWindow):
     from gitfourchette.sidebar.sidebarmodel import SidebarItem
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
 
     node = _worktreeNodeByPath(rw, linked)
     triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"remove worktree")
@@ -304,7 +304,7 @@ def testRemoveWorktreeClean(tempDir, mainWindow):
 
 def testRemoveWorktreeDirtyOffersForce(tempDir, mainWindow):
     from gitfourchette.sidebar.sidebarmodel import SidebarItem
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     writeFile(os.path.join(linked, "dirty.txt"), "uncommitted\n")
 
     node = _worktreeNodeByPath(rw, linked)
@@ -319,7 +319,7 @@ def testRemoveWorktreeDirtyOffersForce(tempDir, mainWindow):
 
 def testRemoveWorktreeDirtyForceDeclined(tempDir, mainWindow):
     from gitfourchette.sidebar.sidebarmodel import SidebarItem
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     writeFile(os.path.join(linked, "dirty.txt"), "uncommitted\n")
 
     node = _worktreeNodeByPath(rw, linked)
@@ -332,7 +332,7 @@ def testRemoveWorktreeDirtyForceDeclined(tempDir, mainWindow):
 
 
 def testRemoveMainWorktreeBlocked(tempDir, mainWindow):
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    wd, _linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     node = _worktreeNodeByPath(rw, wd)
     triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"remove worktree")
     acceptQMessageBox(rw, r"main worktree")
@@ -340,7 +340,7 @@ def testRemoveMainWorktreeBlocked(tempDir, mainWindow):
 
 
 def testRemoveWorktreeOpenInTabBlocked(tempDir, mainWindow):
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     mainWindow.openRepo(linked)  # open the linked worktree's tab
     mainWindow.tabs.setCurrentIndex(0)
 
@@ -353,7 +353,7 @@ def testRemoveWorktreeOpenInTabBlocked(tempDir, mainWindow):
 def testPruneWorktrees(tempDir, mainWindow):
     import shutil
     from gitfourchette.sidebar.sidebarmodel import SidebarItem
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     shutil.rmtree(linked)  # stale admin entry remains
     rw.refreshRepo()
     header = rw.sidebar.findNodeByKind(SidebarItem.WorktreesHeader)
@@ -382,7 +382,7 @@ def testWorktreesSectionAboveStarredAndLocalBranches(tempDir, mainWindow):
 
 
 def testBranchMenuOpensExistingWorktreeInsteadOfNew(tempDir, mainWindow):
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
 
     # no-parent is held by LinkedWT -> "Open in ... Worktree" takes over the
     # Switch-to slot; neither Switch-to nor Checkout-in-New-Worktree remains.
@@ -421,7 +421,7 @@ def testBranchMenuKeepsNewWorktreeWhenNotCheckedOut(tempDir, mainWindow):
 
 def testBranchMenuAndWorktreeRowIgnorePrunableWorktree(tempDir, mainWindow):
     import shutil
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     shutil.rmtree(linked)  # stale admin entry remains, marked prunable by git
     rw.refreshRepo()
 
@@ -470,7 +470,7 @@ def testEnterStaleWorktreeRowFailsSoft(tempDir, mainWindow):
 
 
 def testRemoteBranchMenuOpensWorktreeOfMatchingLocalBranch(tempDir, mainWindow):
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     node = rw.sidebar.findNodeByRef("refs/remotes/origin/no-parent")
     menu = rw.sidebar.makeNodeMenu(node)
     triggerMenuAction(menu, r"open in.+linkedwt.+worktree")
@@ -489,7 +489,7 @@ def testNewWorktreeDialogPathLabelHasBuddy(tempDir, mainWindow):
 
 
 def testSwitchToBranchCheckedOutElsewhereOffersOpen(tempDir, mainWindow):
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
 
     # The context menu no longer offers Switch-to for a held branch;
     # the offer is reached by attempting a switch, i.e. double-click/Enter.
@@ -502,7 +502,7 @@ def testSwitchToBranchCheckedOutElsewhereOffersOpen(tempDir, mainWindow):
 
 
 def testSwitchToBranchCheckedOutElsewhereDeclineDoesNothing(tempDir, mainWindow):
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, _linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
 
     node = rw.sidebar.findNodeByRef("refs/heads/no-parent")
     rw.sidebar.wantEnterNode(node)
@@ -513,7 +513,7 @@ def testSwitchToBranchCheckedOutElsewhereDeclineDoesNothing(tempDir, mainWindow)
 
 
 def testMainWorktreeMarkers(tempDir, mainWindow):
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, _linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
 
     # Tab title gets the [M] prefix (repo has a linked worktree)
     tabText = mainWindow.tabs.tabs.tabText(mainWindow.tabs.currentIndex())
@@ -734,7 +734,7 @@ def testNewWorktreeFromRemoteBranchWithExistingLocal(tempDir, mainWindow):
 
 
 def testRemoteBranchMenuHeldLocalShowsOpenInstead(tempDir, mainWindow):
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)  # holds no-parent
+    _wd, _linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)  # holds no-parent
 
     node = rw.sidebar.findNodeByRef("refs/remotes/origin/no-parent")
     menu = rw.sidebar.makeNodeMenu(node)
@@ -800,7 +800,7 @@ def testMoveWorktreeMigratesPathKeyedState(tempDir, mainWindow):
 
 
 def testMoveMainWorktreeBlocked(tempDir, mainWindow):
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    wd, _linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     node = _worktreeNodeByPath(rw, wd)
     triggerMenuAction(rw.sidebar.makeNodeMenu(node), r"^move worktree")
     acceptQMessageBox(rw, r"main worktree")
@@ -808,7 +808,7 @@ def testMoveMainWorktreeBlocked(tempDir, mainWindow):
 
 
 def testMoveWorktreeOpenInTabBlocked(tempDir, mainWindow):
-    wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
+    _wd, linked, rw = _openRepoWithLinkedWorktree(tempDir, mainWindow)
     mainWindow.openRepo(linked)
     mainWindow.tabs.setCurrentIndex(0)
 

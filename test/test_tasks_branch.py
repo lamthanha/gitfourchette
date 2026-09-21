@@ -1336,7 +1336,7 @@ def testRenameBranchAlsoRenamesRemoteBranch(tempDir, mainWindow):
     dlg = findQDialog(rw, r"rename.+branch")
     checkbox: QCheckBox = dlg.findChild(QCheckBox)
     assert checkbox is not None
-    assert re.search(r"also rename.+localfs/no-parent", checkbox.text(), re.I)
+    assert re.search(r"also rename.+localfs/no-parent", checkbox.text(), re.IGNORECASE)
     assert not checkbox.isChecked()  # default off: no surprise network push
     checkbox.setChecked(True)
     dlg.findChild(QLineEdit).setText("renamed-both")
@@ -1389,7 +1389,7 @@ def testRenameBranchThreadedAlsoRenamesRemoteBranch(tempDir, mainWindow, taskThr
     dlg = waitForQDialog(rw, r"rename.+branch")
     checkbox: QCheckBox = dlg.findChild(QCheckBox)
     assert checkbox is not None
-    assert re.search(r"also rename.+localfs/no-parent", checkbox.text(), re.I)
+    assert re.search(r"also rename.+localfs/no-parent", checkbox.text(), re.IGNORECASE)
     checkbox.setChecked(True)
     dlg.findChild(QLineEdit).setText("renamed-both")
     dlg.accept()

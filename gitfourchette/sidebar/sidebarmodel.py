@@ -1041,11 +1041,10 @@ class SidebarModel(QAbstractItemModel):
                     return "achtung"
                 # Fork: home icon marks the main worktree
                 return "SP_DirHomeIcon" if wt is not None and wt.isMain else "SP_DirIcon"
-            elif fontRole:
-                if os.path.realpath(node.data) == os.path.realpath(self.repo.workdir):
-                    font = QFont(self._parentWidget.font())
-                    font.setBold(True)
-                    return font
+            elif fontRole and os.path.realpath(node.data) == os.path.realpath(self.repo.workdir):
+                font = QFont(self._parentWidget.font())
+                font.setBold(True)
+                return font
 
         elif item == SidebarItem.UncommittedChanges:
             if displayRole:

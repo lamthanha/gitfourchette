@@ -1177,7 +1177,7 @@ def testHideFromStarredAliasLeaf(tempDir, mainWindow):
     assert sm.isExplicitlyHidden(sb.findNodeByRef("refs/heads/no-parent"))
     aliasIndex = sb.nodeToFilterIndex(alias)
     tip = aliasIndex.data(Qt.ItemDataRole.ToolTipRole)
-    assert re.search(r"hidden", tip, re.I)
+    assert re.search(r"hidden", tip, re.IGNORECASE)
 
 
 def testNoExpandZoneOnChildlessNodes(tempDir, mainWindow):

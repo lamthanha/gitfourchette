@@ -35,7 +35,7 @@ def _dialog(mainWindow, rows=None, flattenedMerges=0, offerAutostash=False, hasB
 
 def testTodoDialogDefaults(tempDir, mainWindow):
     dlg = _dialog(mainWindow)
-    assert re.search(r"interactive rebase", dlg.windowTitle(), re.I)
+    assert re.search(r"interactive rebase", dlg.windowTitle(), re.IGNORECASE)
     assert [r.summary for r in dlg.rows()] == ["ir: three", "ir: two", "ir: one"]
     assert [r.summary for r in dlg.executionRows()] == ["ir: one", "ir: two", "ir: three"]
     assert all(r.action == "pick" for r in dlg.rows())

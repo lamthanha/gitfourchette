@@ -99,7 +99,7 @@ def testRebaseOntoFastForward(tempDir, mainWindow):
 
     assert rw.repo.state() == RepositoryState.NONE
     assert rw.repo.branches.local["feature"].target == masterTip
-    assert re.search(r"fast-forward", mainWindow.statusBar().currentMessage(), re.I)
+    assert re.search(r"fast-forward", mainWindow.statusBar().currentMessage(), re.IGNORECASE)
 
 
 def testRebaseOntoFastForwardDirty(tempDir, mainWindow):
@@ -157,7 +157,7 @@ def _bannerButton(rw, pattern: str):
     # buttons) -- pump the queue so isVisibleTo() reflects the real state.
     QTest.qWait(0)
     return next((b for b in rw.mergeBanner.buttons
-                 if re.search(pattern, b.text(), re.I) and b.isVisibleTo(rw)), None)
+                 if re.search(pattern, b.text(), re.IGNORECASE) and b.isVisibleTo(rw)), None)
 
 
 def _startConflictedRebase(tempDir, mainWindow):
@@ -168,7 +168,7 @@ def _startConflictedRebase(tempDir, mainWindow):
     triggerContextMenuAction(rw.graphView.viewport(), r"rebase.+onto here")
     assert rw.repo.state() in REBASE_STATES_FOR_TESTS
     assert rw.mergeBanner.isVisibleTo(rw)
-    assert re.search(r"rebasing", rw.mergeBanner.label.text(), re.I)
+    assert re.search(r"rebasing", rw.mergeBanner.label.text(), re.IGNORECASE)
     return rw
 
 
@@ -230,7 +230,7 @@ def testRebaseStartedOutsideApp(tempDir, mainWindow):
 
     assert rw.repo.state() in REBASE_STATES_FOR_TESTS
     assert rw.mergeBanner.isVisibleTo(rw)
-    assert re.search(r"rebasing", rw.mergeBanner.label.text(), re.I)
+    assert re.search(r"rebasing", rw.mergeBanner.label.text(), re.IGNORECASE)
     for pattern in (r"continue", r"skip", r"abort"):
         assert _bannerButton(rw, pattern) is not None
 
@@ -353,9 +353,9 @@ def testRebaseBannerDetachedHead(tempDir, mainWindow):
     assert rw.repo.state() in REBASE_STATES_FOR_TESTS
     assert rw.mergeBanner.isVisibleTo(rw)
     labelText = rw.mergeBanner.label.text()
-    assert re.search(r"rebasing", labelText, re.I)
+    assert re.search(r"rebasing", labelText, re.IGNORECASE)
     # rebase-merge/head-name contains "detached HEAD" -- must not leak into the title
-    assert not re.search(r"detached", labelText, re.I)
+    assert not re.search(r"detached", labelText, re.IGNORECASE)
 
 
 def testRebaseOntoAncestorIsUpToDate(tempDir, mainWindow):
@@ -378,7 +378,7 @@ def testRebaseOntoAncestorIsUpToDate(tempDir, mainWindow):
 
     assert rw.repo.state() == RepositoryState.NONE
     assert rw.repo.branches.local["feature"].target == oldTip
-    assert re.search(r"up to date", mainWindow.statusBar().currentMessage(), re.I)
+    assert re.search(r"up to date", mainWindow.statusBar().currentMessage(), re.IGNORECASE)
 
 
 def testRebaseDirtyAutostashUnchecked(tempDir, mainWindow):
