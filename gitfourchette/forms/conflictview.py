@@ -4,37 +4,31 @@
 # For full terms, see the included LICENSE file.
 # -----------------------------------------------------------------------------
 
+from __future__ import annotations  # TODO: Remove once we can drop support for Python <= 3.13
+
 import logging
 import os
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, ClassVar
+from weakref import ReferenceType
 
-from gitfourchette import settings, colors
+from gitfourchette import colors
+from gitfourchette import trtables
+from gitfourchette import settings
 from gitfourchette.application import GFApplication
+from gitfourchette.codeview.codewindow import CodeWindow
+from gitfourchette.exttools.mergedriver import MergeDriver
+from gitfourchette.exttools.toolprocess import ToolProcess
 from gitfourchette.forms.ui_conflictview import Ui_ConflictView
 from gitfourchette.gitdriver import GitConflict, GitConflictSides
 from gitfourchette.localization import *
-from gitfourchette.exttools.mergedriver import MergeDriver
 from gitfourchette.qt import *
 from gitfourchette.repomodel import RepoModel
-from gitfourchette.tasks import HardSolveConflicts, AcceptMergeConflictResolution
+from gitfourchette.tasks import HardSolveConflicts, AcceptMergeConflictResolution, OpenMergeTool
+from gitfourchette.tasks.indextasks import PreviewDeltaFile
 from gitfourchette.toolbox import *
-from gitfourchette.exttools.toolprocess import ToolProcess
-from gitfourchette.trtables import TrTables
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ConflictViewKit:
-    page: QWidget
-    description: str = ""
-    captionO: str = ""
-    captionT: str = ""
-    tipO: str = ""
-    tipT: str = ""
-    iconO: str = ""
-    iconT: str = ""
 
 
 class ConflictView(QWidget):
@@ -44,6 +38,7 @@ class ConflictView(QWidget):
     currentConflict: GitConflict | None
     currentMerge: MergeDriver | None
     currentMergeState: MergeDriver.State
+    currentPreviewWindows: list[ReferenceType[QWidget]]
 
     def __init__(self, repoModel: RepoModel, parent=None):
         super().__init__(parent)
@@ -52,6 +47,7 @@ class ConflictView(QWidget):
         self.currentConflict = None
         self.currentMerge = None
         self.currentMergeState = MergeDriver.State.Idle
+        self.currentPreviewWindows = []
 
         self.ui = Ui_ConflictView()
         self.ui.setupUi(self)
@@ -61,6 +57,11 @@ class ConflictView(QWidget):
 
         tweakWidgetFont(self.ui.titleLabel, 130)
         tweakWidgetFont(self.ui.mergeToolButton, 88)
+
+        self.ui.oursPreviewButton.setIcon(stockIcon("view-visible"))
+        self.ui.theirsPreviewButton.setIcon(stockIcon("view-visible"))
+        self.ui.oursPreviewButton.clicked.connect(lambda: self.openPreview("ours"))
+        self.ui.theirsPreviewButton.clicked.connect(lambda: self.openPreview("theirs"))
 
         self.ui.mergeToolButton.clicked.connect(lambda: self.openPrefs.emit(ToolProcess.PrefKeyMergeTool))
         self.ui.oursButton.clicked.connect(lambda: self.execute("ours"))
@@ -88,67 +89,66 @@ class ConflictView(QWidget):
         S = GitConflictSides
 
         if conflict.sides in (S.DeletedByUs, S.AddedByThem):
-            # Theirs: take incoming change. Ours: keep deletion.
+            # Ours - Keep deletion
+            # Theirs - Take incoming changes
             assert conflict.theirs
             assert version in ["ours", "theirs"]
-            if version == "ours":
-                # Ours - Keep deletion
-                self.hardSolveRemove(conflict.theirs.path)
-            else:
-                # Theirs - Take incoming changes
-                self.hardSolveTakeTheirs(conflict.theirs.path)
 
         elif conflict.sides in (S.DeletedByThem, S.AddedByUs):
-            # Theirs: take incoming deletion. Ours: ignore deletion.
+            # Ours - Ignore deletion
+            # Theirs - Take incoming deletion
             assert conflict.ours
             assert version in ["ours", "theirs"]
-            if version == "ours":
-                # Ours - Ignore deletion
-                self.hardSolveKeepOurs(conflict.ours.path)
-            else:
-                # Theirs - Take incoming deletion
-                self.hardSolveRemove(conflict.ours.path)
 
         elif conflict.sides == S.BothDeleted:
             # Delete the file.
             assert conflict.ancestor
             assert version == "ancestor"
-            self.hardSolveRemove(conflict.ancestor.path)
+            # Hack: fall back to either side, doesn't matter
+            version = "ours"
+            assert conflict.ours.path == conflict.ancestor.path
+            assert not conflict.ours
 
         elif conflict.sides in (S.BothModified, S.BothAdded):
             # Pick a side to keep, or merge.
             assert conflict.ours
             assert conflict.theirs
             assert version in ["ours", "theirs", "merge", "remerge"]
-            if version == "ours":
-                self.hardSolveKeepOurs(conflict.ours.path)
-            elif version == "theirs":
-                self.hardSolveTakeTheirs(conflict.theirs.path)
-            else:
+            if version in ["merge", "remerge"]:
                 reopen = version == "remerge"
                 self.openMergeTool(conflict, reopen)
 
         else:
             raise NotImplementedError(f"unsupported conflict sides: {conflict.sides}")
 
-    def hardSolveKeepOurs(self, path: str):
-        HardSolveConflicts.invoke(self, [path], [], [])
-
-    def hardSolveTakeTheirs(self, path: str):
-        HardSolveConflicts.invoke(self, [], [path], [])
-
-    def hardSolveRemove(self, path: str):
-        HardSolveConflicts.invoke(self, [], [], [path])
+        if version in ["ours", "theirs"]:
+            keepOurs = version == "ours"
+            HardSolveConflicts.invoke(self, [self.currentConflict], keepOurs=keepOurs)
 
     def openMergeTool(self, conflict: GitConflict, reopenWorkInProgress=False):
-        mergeDriver = MergeDriver.findOngoingMerge(conflict)
-        if mergeDriver is None:
-            mergeDriver = MergeDriver(self, self.repoModel.repo, conflict)
-        mergeDriver.startProcess(reopenWorkInProgress)
+        OpenMergeTool.invoke(self, conflict, reopenWorkInProgress)
         self.refresh()
 
     def onMergeDriverResponse(self):
         self.refresh()
+
+    def openPreview(self, oursOrTheirs: Literal["ours", "theirs"]):
+        assert oursOrTheirs in ["ours", "theirs"]
+        assert self.currentConflict is not None
+
+        if oursOrTheirs == "ours":
+            df = self.currentConflict.ours
+            prefix = _p("ConflictView", "OUR version")
+        else:
+            df = self.currentConflict.theirs
+            prefix = _p("ConflictView", "THEIR version")
+
+        assert not df.isId0()
+        PreviewDeltaFile.invoke(self, df, prefix, self.registerPreviewWindow)
+
+    def registerPreviewWindow(self, preview: CodeWindow):
+        self.currentPreviewWindows.append(ReferenceType(preview))
+        self.destroyed.connect(preview.close)
 
     def invalidate(self):
         self.currentConflict = None
@@ -159,6 +159,12 @@ class ConflictView(QWidget):
 
         self.currentMergeState = MergeDriver.State.Idle
 
+        while self.currentPreviewWindows:
+            previewWindowRef = self.currentPreviewWindows.pop()
+            previewWindow = previewWindowRef()
+            if previewWindow is not None:
+                previewWindow.close()
+
     def refresh(self):
         if self.currentConflict is not None:
             self.displayConflict(self.currentConflict, forceRefresh=True)
@@ -167,14 +173,26 @@ class ConflictView(QWidget):
         assert conflict is not None, "don't call displayConflict with None"
 
         merge = MergeDriver.findOngoingMerge(conflict)
+        state = merge.state if merge else MergeDriver.State.Idle
 
         # Don't bother refreshing if we're showing the exact same conflict
         if (not forceRefresh
                 and conflict == self.currentConflict
                 and merge is self.currentMerge
-                and (merge.state if merge else MergeDriver.State.Idle) == self.currentMergeState):
+                and state == self.currentMergeState
+                and state != MergeDriver.State.Tentative
+        ):
             logger.debug("Don't need to refresh ConflictView")
             return
+
+        # If tentative, try to transition to Ready
+        if state == MergeDriver.State.Tentative:
+            assert merge is not None
+            if not merge.checkUnchanged():
+                state = MergeDriver.State.Ready
+                merge.state = state
+            else:
+                logger.debug(f"Unchanged: {merge.paths.scratch} {merge.paths.target}")
 
         self.invalidate()
 
@@ -186,42 +204,52 @@ class ConflictView(QWidget):
         else:
             self.currentMergeState = MergeDriver.State.Idle
 
+        sides = conflict.sides
+        strings = GitConflictSidesLocalization.getStrings(sides)
+
         # Reset all text in widgets we can replace placeholder tokens.
         self.ui.retranslateUi(self)
 
-        sides = conflict.sides
-        kit = self.getKit(sides)
-
-        isMergeBusy = merge and merge.state == MergeDriver.State.Busy
-        isMergeFailed = merge and merge.state == MergeDriver.State.Fail
-        isMergeReady = merge and merge.state == MergeDriver.State.Ready
+        # Determine page.
+        if sides.hasOurs() and sides.hasTheirs():
+            page = self.ui.mergePage
+        elif sides.hasOurs() or sides.hasTheirs():
+            page = self.ui.emptyPage
+        else:
+            page = self.ui.confirmDeletionPage
 
         # Hide arrows if all we can do is pick ours/theirs.
+        w: QWidget
         for w in self.ui.oursArrow, self.ui.theirsArrow:
-            w.setVisible(kit.page is not self.ui.emptyPage)
+            w.setVisible(page is not self.ui.emptyPage)
 
         # Hide ours/theirs buttons if all we can do is confirm a deletion.
         for w in self.ui.oursButton, self.ui.theirsButton, self.ui.orLabel:
-            w.setVisible(kit.page is not self.ui.confirmDeletionPage)
+            w.setVisible(page is not self.ui.confirmDeletionPage)
 
         # Reveal the page
-        self.ui.stackedWidget.setCurrentWidget(kit.page)
+        self.ui.stackedWidget.setCurrentWidget(page)
 
-        self.ui.oursButton.setText(kit.captionO)
-        self.ui.oursButton.setToolTip(kit.tipO)
-        self.ui.theirsButton.setText(kit.captionT)
-        self.ui.theirsButton.setToolTip(kit.tipT)
-        self.ui.explainer.setText(f"<b>{englishTitleCase(TrTables.enum(sides))}.</b> {kit.description}")
+        self.ui.oursButton.setText(strings.ours1 + "\u2026")
+        self.ui.oursButton.setToolTip(strings.ours2)
+        self.ui.theirsButton.setText(strings.theirs1 + "\u2026")
+        self.ui.theirsButton.setToolTip(strings.theirs2)
+        self.ui.explainer.setText(f"<b>{strings.title}.</b> {strings.description}")
 
-        # Ours/theirs status icons
-        iconOurs = stockIcon(kit.iconO).pixmap(QSize(16, 16), self.devicePixelRatio())
-        iconTheirs = stockIcon(kit.iconT).pixmap(QSize(16, 16), self.devicePixelRatio())
-        self.ui.oursIcon.setPixmap(iconOurs)
-        self.ui.theirsIcon.setPixmap(iconTheirs)
+        self.ui.oursPreviewButton.setEnabled(sides.hasOurs())
+        self.ui.theirsPreviewButton.setEnabled(sides.hasTheirs())
 
         # Disable ours/theirs buttons while a merge process is running
-        self.ui.oursButton.setEnabled(not isMergeBusy)
-        self.ui.theirsButton.setEnabled(not isMergeBusy)
+        self.ui.oursButton.setEnabled(state != MergeDriver.State.Busy)
+        self.ui.theirsButton.setEnabled(state != MergeDriver.State.Busy)
+
+        # Ours/theirs status icons
+        iconO = "m" if sides.hasOurs() else "missing" if sides == sides.AddedByThem else "d"
+        iconT = "m" if sides.hasTheirs() else "missing" if sides == sides.AddedByUs else "d"
+        for iconLetter, label in ((iconO, self.ui.oursIcon), (iconT, self.ui.theirsIcon)):
+            icon = stockIcon(f"status_{iconLetter}")
+            pixmap = icon.pixmap(QSize(16, 16), self.devicePixelRatio())
+            label.setPixmap(pixmap)
 
         # Format placeholders
         displayPath = os.path.basename(self.currentConflict.ours.path)
@@ -233,19 +261,29 @@ class ConflictView(QWidget):
             formatWidgetTooltip(w, tool=tool)
 
         # Process debriefing
-        if isMergeFailed:
+        if state == MergeDriver.State.Fail:
             self.ui.mergeToolStatus.setText(f"<b style='color: {colors.red.name()}'>{escape(merge.debrief)}</b>")
         else:
             self.ui.mergeToolStatus.setText("")
 
         # Merge busy/ready
-        if isMergeBusy:
+        if state == MergeDriver.State.Busy:
+            assert merge is not None
             assert merge.process is not None
             progressMessage = _("Waiting for you to finish merging this file in {0} (PID {1})…",
                                 lquoe(merge.processName), merge.process.processId())
             self.ui.mergeInProgressLabel.setText(progressMessage)
             self.ui.stackedWidget.setCurrentWidget(self.ui.mergeInProgressPage)
-        elif isMergeReady:
+        elif state == MergeDriver.State.Tentative:
+            # Some merge tools like PyCharm may return 0 but postpone writing
+            # the actual file from a different process some time later.
+            confirmText = _("The file seems unchanged by {0}. Was the merge successful?", lquoe(merge.processName))
+            confirmText = f"<b style='color: {colors.red.name()}'>{escape(confirmText)}</b>"
+            self.ui.confirmMergeLabel.setText(confirmText)
+            self.ui.stackedWidget.setCurrentWidget(self.ui.mergeCompletePage)
+        elif state == MergeDriver.State.Ready:
+            confirmText = _p("ConflictView", "It looks like you’ve finished merging this file.")
+            self.ui.confirmMergeLabel.setText(confirmText)
             self.ui.stackedWidget.setCurrentWidget(self.ui.mergeCompletePage)
 
     def refreshPrefs(self):
@@ -270,99 +308,96 @@ class ConflictView(QWidget):
         merge.deleteNow()
         self.refresh()
 
-    def getKit(self, sides: GitConflictSides) -> ConflictViewKit:
-        kitTable = {
-            GitConflictSides.BothModified: ConflictViewKit(
-                page=self.ui.mergePage,
-                description=_("This file has received changes from both <i>our</i> branch "
-                              "and <i>their</i> branch."),
-                captionO=_("Keep OURS"),
-                captionT=_("Accept THEIRS"),
-                tipO=paragraphs(
-                    _("Resolve the conflict by <b>rejecting incoming changes</b>."),
-                    _("The file will remain unchanged from its state in HEAD.")),
-                tipT=paragraphs(
-                    _("Resolve the conflict by <b>accepting incoming changes</b>."),
-                    _("The file will be <b>replaced</b> with the incoming version.")),
-                iconO="status_m",
-                iconT="status_m",
-            ),
 
-            GitConflictSides.DeletedByUs: ConflictViewKit(
-                page=self.ui.emptyPage,
-                description=_("This file was deleted from <i>our</i> branch, "
-                              "but <i>their</i> branch kept it and made changes to it."),
-                captionO=_("Keep OUR deletion"),
-                captionT=_("Accept THEIR version"),
-                tipO=paragraphs(
-                    _("Resolve the conflict by <b>rejecting incoming changes</b>."),
-                    _("The file won’t be added back to your branch.")),
-                tipT=paragraphs(
-                    _("Resolve the conflict by <b>accepting incoming changes</b>."),
-                    _("The file will be restored to your branch with the incoming changes.")),
-                iconO="status_d",
-                iconT="status_m",
-            ),
+@dataclass
+class GitConflictSidesLocalization:
+    description: str
+    ours1: str
+    ours2: str
+    theirs1: str
+    theirs2: str
+    title: str = "???"
 
-            GitConflictSides.DeletedByThem: ConflictViewKit(
-                page=self.ui.emptyPage,
-                description=_("We’ve made changes to this file in <i>our</i> branch, "
-                              "but <i>their</i> branch has deleted it."),
-                captionO=_("Keep OURS"),
-                captionT=_("Accept deletion"),
-                tipO=paragraphs(
-                    _("Resolve the conflict by <b>rejecting the incoming deletion</b>."),
-                    _("Our version of the file will be kept intact.")),
-                tipT=paragraphs(
-                    _("Resolve the conflict by <b>accepting the incoming deletion</b>."),
-                    _("The file will be deleted.")),
-                iconO="status_m",
-                iconT="status_d",
-            ),
+    _cached: ClassVar[dict[GitConflictSides, GitConflictSidesLocalization]] = {}
+    _cachedLanguage: ClassVar[str] = ""
 
-            GitConflictSides.AddedByUs: ConflictViewKit(
-                page=self.ui.emptyPage,
-                description=_("No common ancestor."),
-                captionO=_("Keep OURS"),
-                captionT=_("Delete it"),
-                iconO="status_a",
-                iconT="status_missing",
-            ),
+    @classmethod
+    def getStrings(cls, sides: GitConflictSides) -> GitConflictSidesLocalization:
+        table = cls._cached
 
-            GitConflictSides.AddedByThem: ConflictViewKit(
-                page=self.ui.emptyPage,
-                description=_("No common ancestor."),
-                captionO=_("Don’t add"),
-                captionT=_("Accept THEIRS"),
-                iconO="status_missing",
-                iconT="status_a",
-            ),
+        if cls._cachedLanguage != settings.prefs.language:
+            cls._cachedLanguage = settings.prefs.language
+            table.clear()
 
-            GitConflictSides.BothAdded: ConflictViewKit(
-                page=self.ui.mergePage,
-                description=_("This file has been created in both <i>our</i> branch "
-                              "and <i>their</i> branch, independently from each other. "
-                              "There is no common ancestor."),
-                captionO=_("Keep OURS"),
-                captionT=_("Accept THEIRS"),
-                tipO=paragraphs(
-                    _("Resolve the conflict by <b>rejecting incoming changes</b>."),
-                    _("The file will remain unchanged from its state in HEAD.")),
-                tipT=paragraphs(
-                    _("Resolve the conflict by <b>accepting incoming changes</b>."),
-                    _("The file will be <b>replaced</b> with the incoming version.")),
-                iconO="status_a",
-                iconT="status_a",
-            ),
+        try:
+            return table[sides]
+        except KeyError:
+            pass
 
-            GitConflictSides.BothDeleted: ConflictViewKit(
-                page=self.ui.confirmDeletionPage,
-                description=_("The file was deleted from <i>our</i> branch, "
-                              "and <i>their</i> branch has deleted it too."),
-                iconO="status_d",
-                iconT="status_d",
-            ),
-        }
+        table[GitConflictSides.BothModified] = GitConflictSidesLocalization(
+            _("This file has received changes from both "
+              "<i>our</i> branch and <i>their</i> branch."),
+            _("Keep OUR version"),
+            _("Keep the file intact in our branch"),
+            _("Accept THEIR version"),
+            _("Replace the file in our branch with the incoming version"),
+        )
 
-        return kitTable[sides]
+        table[GitConflictSides.DeletedByUs] = GitConflictSidesLocalization(
+            _("This file was deleted from <i>our</i> branch, "
+              "but <i>their</i> branch kept it and made changes to it."),
+            _("Keep OUR deletion"),
+            _("Don’t resurrect the file in our branch"),
+            _("Accept THEIR version"),
+            _("Replace the file in our branch with the incoming version"),
+        )
 
+        table[GitConflictSides.DeletedByThem] = GitConflictSidesLocalization(
+            _("We’ve made changes to this file in <i>our</i> branch, "
+              "but <i>their</i> branch has deleted it."),
+            _("Keep OUR version"),
+            _("Keep the file intact in our branch"),
+            _("Accept THEIR deletion"),
+            _("Delete the file in our branch"),
+        )
+
+        table[GitConflictSides.AddedByUs] = GitConflictSidesLocalization(
+            _("No common ancestor."),
+            _("Keep OUR version"),
+            _("Keep the file intact in our branch"),
+            _("Delete it"),
+            _("Delete the file in our branch"),
+        )
+
+        table[GitConflictSides.AddedByThem] = GitConflictSidesLocalization(
+            _("No common ancestor."),
+            _("Don’t add"),
+            _("Don’t add anything to our branch"),
+            _("Accept THEIR version"),
+            _("Add the file to our branch"),
+        )
+
+        table[GitConflictSides.BothAdded] = GitConflictSidesLocalization(
+            _("This file has been created in both <i>our</i> branch "
+              "and <i>their</i> branch, independently from each other. "
+              "There is no common ancestor."),
+            _("Keep OUR version"),
+            _("Keep the file intact in our branch"),
+            _("Accept THEIR version"),
+            _("Replace the file in our branch with the incoming version"),
+        )
+
+        table[GitConflictSides.BothDeleted] = GitConflictSidesLocalization(
+            _("The file was deleted from <i>our</i> branch, "
+              "and <i>their</i> branch has deleted it too."),
+            _("Delete it"),
+            _("Don’t resurrect the file in our branch"),
+            _("Delete it"),
+            _("Don’t resurrect the file in our branch"),
+        )
+
+        # Fill in titles
+        for k, v in table.items():
+            v.title = englishTitleCase(trtables.enum(k))
+
+        return table[sides]

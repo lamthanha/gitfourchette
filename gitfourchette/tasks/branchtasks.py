@@ -339,7 +339,9 @@ class NewBranchFromCommit(RepoTask):
         forbiddenBranchNames = repo.listall_branches(BranchType.LOCAL)
 
         commitMessage = repo.get_commit_message(tip)
-        commitMessage, junk = messageSummary(commitMessage)
+        commitMessage, _junk = messageSummary(commitMessage)
+
+        showSubmoduleControls = bool(repo.listall_submodules_fast())
 
         dlg = NewBranchDialog(
             initialName=localName,
@@ -348,11 +350,8 @@ class NewBranchFromCommit(RepoTask):
             upstreams=upstreams,
             reservedNames=forbiddenBranchNames,
             allowSwitching=not self.repo.any_conflicts,
+            showSubmoduleControls=showSubmoduleControls,
             parent=self.parentWidget())
-
-        if not repo.listall_submodules_fast():
-            dlg.ui.recurseSubmodulesCheckBox.setChecked(False)
-            dlg.ui.recurseSubmodulesCheckBox.setVisible(False)
 
         if suggestUpstream:
             upstreamIndex = dlg.ui.upstreamComboBox.findText(suggestUpstream)
@@ -361,7 +360,6 @@ class NewBranchFromCommit(RepoTask):
                 dlg.ui.upstreamComboBox.setCurrentIndex(upstreamIndex)
 
         dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        dlg.setFixedHeight(dlg.sizeHint().height())
         dlg.show()
         yield from self.flowDialog(dlg)
         dlg.deleteLater()
@@ -459,11 +457,10 @@ class ResetHead(RepoTask):
         hasSubmodules = bool(submoduleDict)
 
         dlg = ResetHeadDialog(onto, branchName, commitMessage, hasSubmodules, parent=self.parentWidget())
-
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # don't leak dialog
         dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        dlg.resize(600, 128)
         yield from self.flowDialog(dlg)
+
         resetMode = dlg.activeMode
         recurseSubmodules = dlg.recurseSubmodules()
 
@@ -506,12 +503,11 @@ class FastForwardBranch(RepoTask):
 
         yield from self.flowEnterUiThread()
         if upToDate:
-            lines = [_("No fast-forwarding necessary.")]
-            if ahead:
-                lines.append(_("Your local branch {0} is ahead of {1}."))
-            else:
-                lines.append(_("Your local branch {0} is already up to date with {1}."))
-            message = paragraphs(lines).format(bquo(localBranchName), bquo(remoteBranchName))
+            message = paragraphs(
+                _("No fast-forwarding necessary."),
+                _("Your local branch {0} is ahead of {1}.") if ahead else
+                _("Your local branch {0} is already up to date with {1}."))
+            message = message.format(bquo(localBranchName), bquo(remoteBranchName))
             self.epilog.status = stripHtml(message)
             yield from self.flowConfirm(text=message, canCancel=False, dontShowAgainKey="NoFastForwardingNecessary")
 
@@ -553,7 +549,7 @@ class FastForwardBranch(RepoTask):
             raise DivergentBranchesError(branch, upstream)
         else:
             # Unborn or something...
-            raise NotImplementedError(f"Cannot fast-forward with {repr(analysis)}.")
+            raise NotImplementedError(f"Cannot fast-forward with {analysis!r}.")
 
         self.epilog.effects |= TaskEffects.Refs
 
@@ -636,7 +632,7 @@ class MergeBranch(RepoTask):
         wantMergeCommit = True
 
         yield from self.flowEnterUiThread()
-        logger.info(f"Merge analysis: {repr(analysis)} {repr(pref)}")
+        logger.info(f"Merge analysis: {analysis!r} {pref!r}")
 
         if anyConflicts:
             message = paragraphs(
@@ -675,7 +671,7 @@ class MergeBranch(RepoTask):
                                         dontShowAgainKey="MergeMayCauseConflicts")
 
         else:
-            raise NotImplementedError(f"Unsupported MergeAnalysis! ma={repr(analysis)} mp={repr(pref)}")
+            raise NotImplementedError(f"Unsupported MergeAnalysis! ma={analysis!r} mp={pref!r}")
 
         # -----------------------------------------------------------
         # Actually perform the fast-forward or the merge

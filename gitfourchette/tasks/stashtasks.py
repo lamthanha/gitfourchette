@@ -8,6 +8,7 @@ import itertools
 import logging
 
 from gitfourchette.forms.stashdialog import StashDialog
+from gitfourchette.gitdriver import GitStatus
 from gitfourchette.localization import *
 from gitfourchette.nav import NavLocator
 from gitfourchette.porcelain import *
@@ -19,27 +20,30 @@ from gitfourchette.trash import Trash
 logger = logging.getLogger(__name__)
 
 _indexStatusTable = {
-    "A": FileStatus.INDEX_NEW,
-    "D": FileStatus.INDEX_DELETED,
-    "M": FileStatus.INDEX_MODIFIED,
-    "R": FileStatus.INDEX_RENAMED,
-    "T": FileStatus.INDEX_TYPECHANGE,
+    GitStatus.Added: FileStatus.INDEX_NEW,
+    GitStatus.Deleted: FileStatus.INDEX_DELETED,
+    GitStatus.Modified: FileStatus.INDEX_MODIFIED,
+    GitStatus.Renamed: FileStatus.INDEX_RENAMED,
+    GitStatus.TypeChanged: FileStatus.INDEX_TYPECHANGE,
 }
 """
 Vanilla git staged file status to libgit2 index status flags
 """
 
 _wtStatusTable = {
-    "?": FileStatus.WT_NEW,
-    "A": FileStatus.WT_NEW,
-    "D": FileStatus.WT_DELETED,
-    "M": FileStatus.WT_MODIFIED,
-    "R": FileStatus.WT_RENAMED,
-    "T": FileStatus.WT_TYPECHANGE,
+    GitStatus.Untracked: FileStatus.WT_NEW,
+    GitStatus.Added: FileStatus.WT_NEW,
+    GitStatus.Deleted: FileStatus.WT_DELETED,
+    GitStatus.Modified: FileStatus.WT_MODIFIED,
+    GitStatus.Renamed: FileStatus.WT_RENAMED,
+    GitStatus.TypeChanged: FileStatus.WT_TYPECHANGE,
 }
 """
 Vanilla git unstaged file status to libgit2 worktree status flags
 """
+
+_statusZero = FileStatus.CURRENT
+assert _statusZero == 0
 
 
 def backupStash(repo: Repo, stashCommitId: Oid):
@@ -99,8 +103,8 @@ class NewStash(RepoTask):
                 ((ud, _wtStatusTable) for ud in unstagedDeltas)
         ):
             path = delta.new.path
-            bits = status.get(path, 0)
-            bits |= statusConversion.get(delta.status, 0)
+            bits = status.get(path, _statusZero)
+            bits |= statusConversion.get(delta.status, _statusZero)
             status[path] = bits
 
         # Ask user what to stash
@@ -199,14 +203,15 @@ class ApplyStash(RepoTask):
                          "because your files have diverged since they were stashed.", bquoe(stashMessage))]
             if deleteAfterApply:
                 message.append(_("The stash wasn’t deleted in case you need to re-apply it later."))
-            showWarning(self.parentWidget(), _("Conflicts caused by stash application"), paragraphs(message))
+            showWarning(self.parentWidget(), _("Conflicts caused by stash application"), paragraphs(*message))
 
         else:
             self.epilog.status = _("Stash {0} couldn’t be applied.", tquoe(stashMessage))
             message = [self.epilog.status]
             if deleteAfterApply:
                 message.append(_("The stash wasn’t deleted in case you need to re-apply it later."))
-            raise AbortTask(driver.htmlErrorText(paragraphs(message)), details=driver.formatCommandLine())
+            markup = driver.htmlErrorText(paragraphs(*message))
+            raise AbortTask(markup, details=driver.formatCommandLine())
 
 
 class DropStash(RepoTask):

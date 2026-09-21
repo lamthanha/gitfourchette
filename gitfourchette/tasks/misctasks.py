@@ -6,10 +6,12 @@
 
 import logging
 import re
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
+from typing import ClassVar
 
+from gitfourchette import trtables
 from gitfourchette import settings
 from gitfourchette.forms.commitinfodialog import CommitInfoDialog
 from gitfourchette.forms.ignorepatterndialog import IgnorePatternDialog
@@ -21,9 +23,8 @@ from gitfourchette.porcelain import Oid, Signature
 from gitfourchette.qt import *
 from gitfourchette.repomodel import UC_FAKEID, BEGIN_SSH_SIGNATURE, GpgStatus
 from gitfourchette.tasks import TaskEffects
-from gitfourchette.tasks.repotask import RepoTask, AbortTask, FlowControlToken
+from gitfourchette.tasks.repotask import RepoTask, AbortTask
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
 
 logger = logging.getLogger(__name__)
 
@@ -127,9 +128,9 @@ class GetCommitInfo(RepoTask):
         if gpgStatus == GpgStatus.Unsigned:
             gpgMarkup = tagify(_("(not signed)"), "<i>")
         elif gpgKeyInfo:
-            gpgMarkup = f"{gpgStatus.iconHtml()} {TrTables.enum(gpgStatus)}<br><small>{escape(gpgKeyInfo)}</small>"
+            gpgMarkup = f"{gpgStatus.iconHtml()} {trtables.enum(gpgStatus)}<br><small>{escape(gpgKeyInfo)}</small>"
         else:
-            gpgMarkup = f"{gpgStatus.iconHtml()} {TrTables.enum(gpgStatus)}"
+            gpgMarkup = f"{gpgStatus.iconHtml()} {trtables.enum(gpgStatus)}"
 
         # Assemble table rows
         table = tableRow(_("Hash"), commit.id)
@@ -147,7 +148,7 @@ class GetCommitInfo(RepoTask):
             homeChainTopId = graph.getFrame(int(homeChain.topRow)).commit
             homeChainTopStr = commitLink(homeChainTopId) if type(homeChainTopId) is Oid else str(homeChainTopId)
             table += tableRow("Graph row", repr(graph.commitRows[oid]))
-            table += tableRow("Home chain", f"{repr(homeChain.topRow)} {homeChainTopStr} ({id(homeChain) & 0xFFFFFFFF:X})")
+            table += tableRow("Home chain", f"{homeChain.topRow!r} {homeChainTopStr} ({id(homeChain) & 0xFFFFFFFF:X})")
             table += tableRow("Arcs", f"{len(frame.openArcs)} open, {len(frame.solvedArcs)} solved")
             # table += tableRow("View row", self.rw.graphView.currentIndex().row())
             details = str(frame) + "\n\n" + details
@@ -179,9 +180,7 @@ class GetCommitInfo(RepoTask):
 
 
 class VerifyGpgSignature(RepoTask):
-    _GnupgLinePattern = re.compile(r"^\[GNUPG:]\s+(\w+)\s*(.*)$")
-
-    _GnupgStatusTable = {
+    _GnupgStatusTable: ClassVar = {
         # The order in this table is significant for parseGnupgVerification
         "NO_PUBKEY" : GpgStatus.MissingKey,
         "GOODSIG"   : GpgStatus.GoodUntrusted,
@@ -192,8 +191,14 @@ class VerifyGpgSignature(RepoTask):
         "BADSIG"    : GpgStatus.Bad,
     }
 
-    _SshGoodTrustedPattern = re.compile(r'^Good "git" signature for (.+) with \S+ key (.+)')
-    _SshGoodUntrustedPattern = re.compile(r'^Good "git" signature with \S+ key (.+)')
+    _GnupgLinePattern: ClassVar = re.compile(
+        r"^\[GNUPG:]\s+(\w+)\s*(.*)$")
+
+    _SshGoodTrustedPattern: ClassVar = re.compile(
+        r'^Good "git" signature for (.+) with \S+ key (.+)')
+
+    _SshGoodUntrustedPattern: ClassVar = re.compile(
+        r'^Good "git" signature with \S+ key (.+)')
 
     def flow(self, oid: Oid, dialogParent: QWidget | None = None):
         commit = self.repo.peel_commit(oid)
@@ -213,7 +218,7 @@ class VerifyGpgSignature(RepoTask):
         # Update gpg status cache
         self.repoModel.cacheGpgStatus(oid, status, keyInfo)
 
-        paras = [f"{stockIconImgTag(status.iconName())} {TrTables.enum(status)}"]
+        paras = [f"{stockIconImgTag(status.iconName())} {trtables.enum(status)}"]
 
         if status == GpgStatus.MissingKey:
             paras.append(_("Hint: Public key {0} isn’t in your GPG keyring. "
@@ -224,10 +229,16 @@ class VerifyGpgSignature(RepoTask):
             paras.append(f"<i>{escape(keyInfo)}</i>")
 
         title = _("Verify signature in commit {0}", tquo(shortHash(oid)))
-        mbIcon = ("information" if not fail else
-                  "critical" if status in [GpgStatus.RevokedKey, GpgStatus.Bad] else
-                  "warning")
-        qmb = asyncMessageBox(self.parentWidget(), mbIcon, title, paragraphs(paras),
+
+        mbIcon: MessageBoxIconName
+        if not fail:
+            mbIcon = "information"
+        elif status in [GpgStatus.RevokedKey, GpgStatus.Bad]:
+            mbIcon = "critical"
+        else:
+            mbIcon = "warning"
+
+        qmb = asyncMessageBox(self.parentWidget(), mbIcon, title, paragraphs(*paras),
                               QMessageBox.StandardButton.Ok)# | QMessageBox.StandardButton.Help)
         qmb.setDetailedText(driver.stderrScrollback())
 
@@ -443,8 +454,7 @@ class QueryCommitsTouchingPath(RepoTask):
 
         cpf.resultsUpdated.emit()
 
-    def _findMatchingCommits(self, pathspec: str
-                             ) -> Generator[FlowControlToken, None, set[Oid]]:
+    def _findMatchingCommits(self, pathspec: str) -> RepoTask.Flow[set[Oid]]:
         oids: set[Oid] = set()
 
         pathspec = pathspec.strip()

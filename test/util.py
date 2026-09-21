@@ -14,7 +14,7 @@ import zipfile
 from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
-from typing import TypeVar, Literal
+from typing import Literal
 
 import pygit2
 import pytest
@@ -23,7 +23,6 @@ from gitfourchette.application import GFApplication
 from gitfourchette.exttools.toolcommands import ToolCommands
 from gitfourchette.porcelain import *
 from gitfourchette.toolbox import QPoint_zero, stripAccelerators, stripHtml
-from gitfourchette.syntax import syntaxHighlightingAvailable
 from . import *
 
 TEST_SIGNATURE = Signature("Test Person", "toto@example.com", 1672600000, 0)
@@ -55,14 +54,6 @@ requiresGpg = pytest.mark.skipif(
 requiresFuse = pytest.mark.skipif(
     os.environ.get("TESTFUSE", "") in {"0", ""},
     reason="Requires FUSE (test.py --with-fuse)")
-
-requiresPygments = pytest.mark.skipif(
-    not syntaxHighlightingAvailable,
-    reason="Requires Pygments")
-
-_T = TypeVar("_T")
-_TInheritsQWidget = TypeVar("_TInheritsQWidget", bound=QWidget)
-_TInheritsQDialog = TypeVar("_TInheritsQDialog", bound=QDialog)
 
 
 def pause(seconds: int = 3):
@@ -290,6 +281,7 @@ def makeBareCopy(
         barePath = f"{path}/../{basename}-bare-{addAsRemote}.git"  # create bare repo besides real repo in temporary directory
     barePath = os.path.normpath(barePath)
 
+    assert not Path(path, ".git/objects/maintenance.lock").exists()
     shutil.copytree(F"{path}/.git", barePath)
 
     conf = GitConfig(F"{barePath}/config")
@@ -351,6 +343,10 @@ def readFile(path: str, unlink: bool = False) -> bytes:
 def readTextFile(path: str, unlink: bool = False):
     data = readFile(path, unlink=unlink)
     return data.decode("utf-8")
+
+
+def readOidFile(path: str) -> Oid:
+    return Oid(hex=readTextFile(path).strip())
 
 
 def waitForFile(path: str, timeout: int = DEFAULT_TIMEOUT):
@@ -432,7 +428,7 @@ def findMenuAction(menu: QMenu | QMenuBar, pattern: str) -> QAction:
 
         for submenu, title in submenus:
             title = stripAccelerators(title)
-            if re.search(submenuPattern, title, re.I):
+            if re.search(submenuPattern, title, re.IGNORECASE):
                 menu = submenu
                 break
         else:
@@ -453,8 +449,8 @@ def triggerMenuAction(menu: QMenu | QMenuBar, pattern: str):
     action.trigger()
 
 
-def triggerContextMenuAction(widget: QWidget, pattern: str):
-    menu = summonContextMenu(widget)
+def triggerContextMenuAction(widget: QWidget, pattern: str, point: QPoint = QPoint_zero):
+    menu = summonContextMenu(widget, point)
     triggerMenuAction(menu, pattern)
     try:
         menu.close()
@@ -465,7 +461,7 @@ def triggerContextMenuAction(widget: QWidget, pattern: str):
 def qteFind(qte: QTextEdit | QPlainTextEdit, pattern: str, plainText=False):
     assert isinstance(qte, (QTextEdit, QPlainTextEdit))
     if plainText:
-        match = re.search(pattern, qte.toPlainText(), re.I | re.M | re.DOTALL)
+        match = re.search(pattern, qte.toPlainText(), re.IGNORECASE | re.MULTILINE | re.DOTALL)
         found = bool(match)
     else:
         # qte.find() starts searching at current cursor position, so reset cursor to top of document
@@ -536,10 +532,10 @@ def qcbSetIndex(qcb: QComboBox, pattern: str):
     return i
 
 
-def findWindow(
+def findWindow[T: QWidget](
         pattern: str,
-        t: type[_TInheritsQWidget] = QWidget
-) -> _TInheritsQWidget:
+        t: type[T] = QWidget
+) -> T:
     widget: QWidget
     for widget in QApplication.topLevelWidgets():
         if not widget.isEnabled() or widget.isHidden():
@@ -552,11 +548,11 @@ def findWindow(
     raise KeyError(f"did not find widget window matching \"{pattern}\"")
 
 
-def findQDialog(
+def findQDialog[T: QDialog](
         parent: QWidget,
         pattern: str,
-        t: type[_TInheritsQDialog] = QDialog
-) -> _TInheritsQDialog:
+        t: type[T] = QDialog
+) -> T:
     dlg: QDialog
     for dlg in parent.findChildren(t):
         if not dlg.isEnabled() or dlg.isHidden():
@@ -567,12 +563,12 @@ def findQDialog(
     raise KeyError(f"did not find qdialog matching \"{pattern}\"")
 
 
-def waitForQDialog(
+def waitForQDialog[T: QDialog](
         parent: QWidget,
         pattern: str,
         timeout: int = DEFAULT_TIMEOUT,
-        t: type[_TInheritsQDialog] = QDialog
-) -> _TInheritsQDialog:
+        t: type[T] = QDialog
+) -> T:
     def tryFind():
         try:
             return findQDialog(parent, pattern, t)
@@ -581,11 +577,11 @@ def waitForQDialog(
     return waitUntilTrue(tryFind, timeout=timeout)
 
 
-def waitUntilTrue(
-        callback: Callable[[], _T],
+def waitUntilTrue[T](
+        callback: Callable[[], T],
         timeout: int = DEFAULT_TIMEOUT,
         interval: int = 100,
-) -> _T:
+) -> T:
     assert timeout >= interval
     deadline = QDeadlineTimer(timeout)
     while not deadline.hasExpired():
@@ -651,7 +647,7 @@ def findQMessageBox(parent: QWidget, textPattern: str) -> QMessageBox:
         if not qmb.isVisibleTo(parent):  # skip zombie QMBs
             continue
         numBoxesFound += 1
-        haystack = "\n".join([qmb.windowTitle(), qmb.text(), qmb.informativeText()])
+        haystack = f"{qmb.windowTitle()}\n{qmb.text()}\n{qmb.informativeText()}"
         haystack = stripHtml(haystack)
         if re.search(textPattern, haystack, re.IGNORECASE | re.DOTALL):
             return qmb
@@ -718,11 +714,11 @@ def acceptQFileDialog(parent: QWidget, textPattern: str, path: str | PathLike, u
     return str(path)
 
 
-def findChildWithText(
+def findChildWithText[TInheritsQWidget: QWidget](
         parent: QWidget,
         pattern: str,
-        t: type[_TInheritsQWidget]
-) -> _TInheritsQWidget:
+        t: type[TInheritsQWidget]
+) -> TInheritsQWidget:
     for widget in parent.findChildren(t):
         if findTextInWidget(widget, pattern):
             return widget
@@ -745,7 +741,7 @@ def findTextInWidget(
         text = stripAccelerators(text)
     else:
         text = stripHtml(text)
-    return re.search(pattern, text, re.I | re.M | re.S)
+    return re.search(pattern, text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
 
 
 def mouseSpecialClick(widget: QWidget, clickType: Literal["middle", "double"], pos: QPoint = QPoint_zero):
@@ -807,11 +803,10 @@ def summonToolTip(target: QWidget, localPoint=QPoint_zero):
     # NOTE: DOES NOT WORK ON WAYLAND because they disallow moving the pointer,
     # but offscreen tests will still work fine.
     QCursor.setPos(target.mapToGlobal(localPoint))
-    QTest.qWait(0)
+    QTest.qWait(0)  # Note: on macOS/offscreen, this may cause the tooltip to appear immediately
 
     # QTest.mouseMove doesn't trigger the tooltip in offscreen tests,
     # so post a QHelpEvent instead.
-    assert not QToolTip.isVisible(), f"QToolTip still visible: {stripHtml(QToolTip.text())}"
     helpEvent = QHelpEvent(QEvent.Type.ToolTip, localPoint, target.mapToGlobal(localPoint))
     QApplication.instance().postEvent(target, helpEvent)
 
@@ -826,19 +821,21 @@ def summonToolTip(target: QWidget, localPoint=QPoint_zero):
 
 def dismissToolTip(pattern: str):
     assert QToolTip.isVisible()
-    assert re.search(pattern, QToolTip.text(), re.I)
+    assert re.search(pattern, QToolTip.text(), re.IGNORECASE)
     QToolTip.hideText()
     waitUntilTrue(lambda: not QToolTip.isVisible())
 
 
-def runShellScript(script: str, directory: str, sig=TEST_SIGNATURE):
+def shell(script: str, directory: str, authorSig=TEST_SIGNATURE, committerSig=TEST_SIGNATURE):
     from gitfourchette.toolbox.gitutils import signatureEnvironmentVariables
 
     env = {}
 
     # Sanitize author/committer
-    env.update(signatureEnvironmentVariables(sig, "AUTHOR"))
-    env.update(signatureEnvironmentVariables(sig, "COMMITTER"))
+    if authorSig is not None:
+        env.update(signatureEnvironmentVariables(authorSig, "AUTHOR"))
+    if committerSig is not None:
+        env.update(signatureEnvironmentVariables(committerSig, "COMMITTER"))
 
     # Make sure we're forwarding the correct git config directories
     assert os.environ.get("GIT_CONFIG_GLOBAL", ""), "fixture didn't set GIT_CONFIG_GLOBAL"

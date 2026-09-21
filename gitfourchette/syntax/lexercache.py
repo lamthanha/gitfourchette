@@ -9,15 +9,11 @@ from __future__ import annotations
 import logging
 import os.path
 import re
-from contextlib import suppress
+from typing import ClassVar
 
-try:
-    import pygments.lexers
-    from pygments.lexer import Lexer
-    from pygments import __version__ as pygmentsVersion
-    hasPygments = True
-except ImportError:  # pragma: no cover
-    hasPygments = False
+import pygments.lexers
+from pygments.lexer import Lexer
+from pygments import __version__ as pygmentsVersion
 
 from gitfourchette.toolbox.benchmark import benchmark
 
@@ -79,19 +75,16 @@ class LexerCache:
     Fast drop-in replacement for pygments.lexers.get_lexer_for_filename().
     """
 
-    lexerAliases: dict[str, str] = {}
+    lexerAliases: ClassVar[dict[str, str]] = {}
     " Lexer aliases by file extensions or verbatim file names "
 
-    lexerInstances: dict[str, Lexer] = {}
+    lexerInstances: ClassVar[dict[str, Lexer]] = {}
     " Lexer instances by aliases "
 
     @classmethod
     @benchmark
     def getLexerFromPath(cls, path: str, allowPlugins: bool) -> Lexer | None:
         assert path
-
-        if not hasPygments:  # pragma: no cover
-            return None
 
         if not cls.lexerAliases:
             cls.warmUp(allowPlugins)
@@ -111,8 +104,9 @@ class LexerCache:
             return None
 
         # Get existing lexer instance
-        with suppress(KeyError):
-            return cls.lexerInstances[alias]
+        instance = cls.lexerInstances.get(alias)
+        if instance is not None:
+            return instance
 
         # Instantiate new lexer.
         # Notes:
@@ -126,7 +120,7 @@ class LexerCache:
 
     @classmethod
     @benchmark
-    def warmUp(cls, allowPlugins: bool):
+    def warmUp(cls, allowPlugins: bool) -> None:
         """
         Cache lexerAliases (map of filename patterns to lexer names).
         Turn off plugins for a significant speedup.
@@ -141,7 +135,7 @@ class LexerCache:
                 continue
 
             lexerName = aliases[0]
-            patternSet = set()
+            patternSet: set[str] = set()
             if lexerName in lexers:  # pragma: no cover
                 logger.warning(f"Duplicated lexer name: {lexerName}")
             lexers[lexerName] = patternSet
@@ -175,7 +169,7 @@ class LexerCache:
         patternsToLexers = {}
         for lexerName, patternSet in lexers.items():
             if False:  # pragma: no cover - replace with 'if True' to debug missing disambiguations
-                overwrite = patternSet.intersection(patternsToLexers)
+                overwrite = patternSet.intersection(patternsToLexers)  # type: ignore[unreachable]
                 if overwrite:
                     logger.warning(f"Missing disambiguation: Lexer '{lexerName}' will take precedence over { { p: patternsToLexers[p] for p in overwrite } }")
 

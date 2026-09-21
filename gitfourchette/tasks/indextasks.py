@@ -7,11 +7,14 @@
 import logging
 import os
 import shutil
-from itertools import chain
 from pathlib import Path
+from collections.abc import Callable
 
+from gitfourchette import trtables
 from gitfourchette import settings
+from gitfourchette.codeview.codewindow import CodeWindow
 from gitfourchette.exttools.mergedriver import MergeDriver
+from gitfourchette.exttools.toolprocess import ToolProcess
 from gitfourchette.gitdriver import *
 from gitfourchette.localization import *
 from gitfourchette.nav import NavLocator
@@ -20,7 +23,6 @@ from gitfourchette.qt import *
 from gitfourchette.tasks.repotask import AbortTask, RepoTask, TaskEffects
 from gitfourchette.toolbox import *
 from gitfourchette.trash import Trash
-from gitfourchette.trtables import TrTables
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +94,7 @@ class StageFiles(_BaseStagingTask):
                 m = _("Uncommitted changes in the submodule can’t be staged from the parent repository.")
 
             # Staging a submodule deletion, and the submodule is still in .gitmodules
-            elif (delta.status == "D"
+            elif (delta.status == GitStatus.Deleted
                   and delta.old.mode == FileMode.COMMIT
                   and delta.old.path in self.repo.listall_submodules_dict_at_head()):
                 m = _("Don’t forget to remove the submodule from {0} to complete its deletion.", tquo(DOT_GITMODULES))
@@ -139,7 +141,7 @@ class DiscardFiles(_BaseStagingTask):
         if len(deltas) == 1:
             delta = deltas[0]
             bpath = bquo(delta.new.path)
-            if delta.status == "?":  # untracked
+            if delta.status == GitStatus.Untracked:
                 really = _("Really delete {0}?", bpath)
                 really += " " + _("Git isn’t tracking this file, so you may not be able to recover it from older commits.")
                 verb = _("Delete")
@@ -166,7 +168,7 @@ class DiscardFiles(_BaseStagingTask):
 
         textPara.append(_("This cannot be undone!"))
 
-        yield from self.flowConfirm(text=paragraphs(textPara), verb=verb, buttonIcon="git-discard")
+        yield from self.flowConfirm(text=paragraphs(*textPara), verb=verb, buttonIcon="git-discard")
 
         self.epilog.effects |= TaskEffects.Workdir
         if numSubmos:
@@ -180,9 +182,9 @@ class DiscardFiles(_BaseStagingTask):
                 except Trash.BackupSkipped as ex:
                     logger.warning(f"Backup skipped: {ex}")
 
-        tracked = [d.new.path for d in deltas if d.status != "?"]
-        untrackedFiles = [d.new.path for d in deltas if d.status == "?" and d.new.mode != FileMode.TREE]
-        untrackedTrees = [d.new.path for d in deltas if d.status == "?" and d.new.mode == FileMode.TREE]
+        tracked = [d.new.path for d in deltas if d.status != GitStatus.Untracked]
+        untrackedFiles = [d.new.path for d in deltas if d.status == GitStatus.Untracked and d.new.mode != FileMode.TREE]
+        untrackedTrees = [d.new.path for d in deltas if d.status == GitStatus.Untracked and d.new.mode == FileMode.TREE]
 
         # Discard untracked trees. They have already been backed up above,
         # but restore_files_from_index isn't capable of removing trees.
@@ -206,14 +208,14 @@ class DiscardFiles(_BaseStagingTask):
 
     def _backupDelta(self, delta: GitDelta):
         # Don't back up deletions
-        if delta.status == "D":
+        if delta.status == GitStatus.Deleted:
             return
 
         trash = Trash.instance()
         path = delta.new.path
         workdir = self.repo.workdir
 
-        if delta.status == "?":
+        if delta.status == GitStatus.Untracked:
             if delta.new.mode == FileMode.TREE:
                 # Untracked tree
                 trash.backupTree(workdir, path)
@@ -238,7 +240,7 @@ class UnstageFiles(_BaseStagingTask):
         paths = []
         for delta in deltas:
             paths.append(delta.new.path)
-            if delta.status == "R":
+            if delta.status == GitStatus.Renamed:
                 paths.append(delta.old.path)
 
         self.epilog.effects |= TaskEffects.Workdir
@@ -252,17 +254,18 @@ class DiscardModeChanges(_BaseStagingTask):
     def flow(self, deltas: list[GitDelta]):
         paths = [delta.new.path for delta in deltas]
         numFiles = len(paths)
-        textPara = []
 
         if numFiles == 0:  # Nothing to unstage (may happen if user keeps pressing Delete in file list view)
             QApplication.beep()
             raise AbortTask()
-        elif numFiles == 1:
-            textPara.append(_("Really discard mode change in {0}?", bquo(paths[0])))
-        else:
-            textPara.append(_("Really discard mode changes in <b>{n} files</b>?", n=numFiles))
-        textPara.append(_("This cannot be undone!"))
-        yield from self.flowConfirm(text=paragraphs(textPara), verb=_("Discard mode changes"), buttonIcon="git-discard")
+
+        text = paragraphs(
+            (_("Really discard mode change in {0}?", bquo(paths[0]))
+             if numFiles == 1 else
+             _("Really discard mode changes in <b>{n} files</b>?", n=numFiles)),
+            _("This cannot be undone!"))
+
+        yield from self.flowConfirm(text=text, verb=_("Discard mode changes"), buttonIcon="git-discard")
 
         yield from self.flowEnterWorkerThread()
         self.epilog.effects |= TaskEffects.Workdir
@@ -284,7 +287,7 @@ class UnstageModeChanges(_BaseStagingTask):
             of = delta.old
             nf = delta.new
             if (of.mode != nf.mode
-                    and delta.status not in "AD?"  # ADDED, DELETED, UNTRACKED
+                    and delta.status not in [GitStatus.Added, GitStatus.Deleted, GitStatus.Untracked]
                     and of.mode in [FileMode.BLOB, FileMode.BLOB_EXECUTABLE]):
                 index.add(IndexEntry(nf.path, Oid(hex=nf.id), of.mode))
         index.write()
@@ -294,19 +297,17 @@ class ApplyPatch(RepoTask):
     def flow(self, delta: GitDelta, subPatch: str, purpose: PatchPurpose):
         if not subPatch:
             QApplication.beep()
-            verb = TrTables.enum(purpose & PatchPurpose.VerbMask).lower()
+            verb = trtables.enum(purpose & PatchPurpose.VerbMask).lower()
             message = _("Can’t {verb} the selection because no red/green lines are selected.", verb=verb)
             raise AbortTask(message, asStatusMessage=True)
 
         if purpose & PatchPurpose.Discard:
-            title = TrTables.enum(purpose)
-            textPara = []
-            if purpose & PatchPurpose.Hunk:
-                textPara.append(_("Really discard this hunk?"))
-            else:
-                textPara.append(_("Really discard the selected lines?"))
-            textPara.append(_("This cannot be undone!"))
-            yield from self.flowConfirm(title, text=paragraphs(textPara), verb=title, buttonIcon="git-discard-lines")
+            title = trtables.enum(purpose)
+            isHunk = purpose & PatchPurpose.Hunk
+            text = paragraphs(
+                _("Really discard this hunk?") if isHunk else _("Really discard the selected lines?"),
+                _("This cannot be undone!"))
+            yield from self.flowConfirm(title, text=text, verb=title, buttonIcon="git-discard-lines")
 
             try:
                 Trash.instance().backupPatch(self.repo.workdir, subPatch, delta.new.path)
@@ -326,43 +327,188 @@ class ApplyPatch(RepoTask):
 
         self.repo.apply(subPatch, applyLocation)
 
-        self.epilog.status = TrTables.patchPurposePastTense(purpose)
+        self.epilog.status = ApplyPatch.patchPurposePastTense(purpose)
+
+    @staticmethod
+    def patchPurposePastTense(purpose: PatchPurpose):
+        pp = PatchPurpose
+        t = {
+            pp.Lines | pp.Stage: _p("PatchPurpose", "Lines staged."),
+            pp.Lines | pp.Unstage: _p("PatchPurpose", "Lines unstaged."),
+            pp.Lines | pp.Discard: _p("PatchPurpose", "Lines discarded."),
+            pp.Hunk | pp.Stage: _p("PatchPurpose", "Hunk staged."),
+            pp.Hunk | pp.Unstage: _p("PatchPurpose", "Hunk unstaged."),
+            pp.Hunk | pp.Discard: _p("PatchPurpose", "Hunk discarded."),
+            pp.File | pp.Stage: _n("File staged.", "{n} files staged.", 1),
+            pp.File | pp.Unstage: _n("File unstaged.", "{n} files unstaged.", 1),
+            pp.File | pp.Discard: _n("File discarded.", "{n} files discarded.", 1),
+        }
+        return t.get(purpose, "")
 
 
 class HardSolveConflicts(RepoTask):
-    def flow(self, ours: list[str], theirs: list[str], remove: list[str]):
-        # Back up affected files
+    def flow(self, conflicts: list[GitConflict], keepOurs: bool):
+        # First ask for confirmation
+        yield from self._confirm(conflicts, keepOurs)
+
+        # Sort files in 'keep' and 'nuke' buckets
+        files = [c.ours if keepOurs else c.theirs for c in conflicts]
+        keepPaths = [f.path for f in files if not f.isId0()]
+        nukePaths = [f.path for f in files if f.isId0()]
+
+        # Back up nuked files + THEIRS
         if Trash.enabled():
-            for path in chain(theirs, remove):
+            backupList = nukePaths[:]
+            if not keepOurs:
+                backupList += keepPaths
+
+            for path in backupList:
                 try:
                     Trash.instance().backupFile(self.repo.workdir, path)
                 except Trash.BackupSkipped as ex:
                     logger.warning(f"Backup skipped: {ex}")
 
-        # Restore desired sides
         self.epilog.effects |= TaskEffects.Workdir
 
-        if ours:
-            yield from self.flowCallGit("restore", "--progress", "--ours", "--", *ours)
-
-        if theirs:
-            yield from self.flowCallGit("restore", "--progress", "--theirs", "--", *theirs)
-
-        # Stage the files we kept to resolve the conflict
-        if ours or theirs:
-            yield from self.flowCallGit("add", "--force", "--", *chain(ours, theirs))
+        # Restore desired sides, then stage the files to resolve the conflict
+        if keepPaths:
+            sideArg = "--ours" if keepOurs else "--theirs"
+            yield from self.flowCallGit("restore", "--progress", sideArg, "--", *keepPaths)
+            yield from self.flowCallGit("add", "--force", "--", *keepPaths)
 
         # Stage deletions to resolve the conflict
-        if remove:
-            yield from self.flowCallGit("rm", "--", *remove)
+        if nukePaths:
+            yield from self.flowCallGit("rm", "--", *nukePaths)
 
         # Jump to any staged file after the task
-        for path in chain(ours, theirs):
+        for path in keepPaths:
             if Path(self.repo.in_workdir(path)).is_file():
                 self.epilog.jumpTo = NavLocator.inStaged(path)
                 break
 
-        self.epilog.status = _n("Conflict resolved.", "{n} conflicts resolved.", len(ours) + len(theirs) + len(remove))
+        self.epilog.status = _n("Conflict resolved.", "{n} conflicts resolved.", len(conflicts))
+
+    def _confirm(self, conflicts: list[GitConflict], keepOurs: bool):
+        title = _n("Resolve conflict", "Resolve {n} conflicts", len(conflicts))
+        verb = _("Keep OUR version") if keepOurs else _("Accept THEIR version")
+        promptSuffix = ""
+
+        sidesSet = {c.sides for c in conflicts}
+        if len(sidesSet) == 1:
+            from gitfourchette.forms.conflictview import GitConflictSidesLocalization
+            strings = GitConflictSidesLocalization.getStrings(conflicts[0].sides)
+            a = _("Reject incoming changes") if keepOurs else _("Accept incoming changes")
+            b = strings.ours2 if keepOurs else strings.theirs2
+            promptSuffix = f"<p>\u2192 {a}.<br>\u2192 {b}."
+
+        if len(conflicts) == 1:
+            if keepOurs:
+                singlePath = hquoe(Path(conflicts[0].ours.path).name)
+            else:
+                singlePath = hquoe(Path(conflicts[0].theirs.path).name)
+            prompt = _("<b>{verb}</b> to resolve the conflict on {single}?",
+                       verb=verb, single=singlePath)
+        else:
+            prompt = _n("<b>{verb}</b> to resolve the conflict on {n} file?",
+                        "<b>{verb}</b> to resolve conflicts on {n} files?",
+                        n=len(conflicts), verb=verb)
+
+        yield from self.flowConfirm(title, text=prompt + promptSuffix, verb=verb)
+
+
+class OpenMergeTool(RepoTask):
+    def flow(self, conflict: GitConflict, reopenWorkInProgress: bool):
+        mergeDriver = MergeDriver.findOngoingMerge(conflict)
+
+        if mergeDriver is None:
+            mergeDriver = yield from self.makeMergeDriver(conflict)
+
+        mergeDriver.startProcess(reopenWorkInProgress)
+        return mergeDriver
+
+    def makeMergeDriver(self, conflict: GitConflict):
+        mergeTempDir = QTemporaryDir(str(Path(qTempDir(), "merge")))
+        into = mergeTempDir.path()
+        repo = self.repo
+
+        def dump(df: GitDeltaFile, prefix: str):
+            path = yield from self.flowSubtask(SaveDeltaFileAs, df, saveIntoDir=into, prefix=prefix)
+            return path
+
+        targetPath = repo.in_workdir(conflict.ours.path)
+        baseName = Path(targetPath).name
+
+        # Dump OURS and THEIRS blobs into the temporary directory
+        oursPath = yield from dump(conflict.ours, prefix="[OURS]")
+        theirsPath = yield from dump(conflict.theirs, prefix="[THEIRS]")
+
+        if conflict.ancestor:
+            # Dump ANCESTOR blob into the temporary directory
+            ancestorPath = yield from dump(conflict.ancestor, prefix="[ANCESTOR]")
+        else:
+            # There's no ancestor! Some merge tools can fake a 3-way merge without
+            # an ancestor (e.g. PyCharm), but others won't (e.g. VS Code).
+            # To make sure we get a 3-way merge, copy our current workdir file as
+            # the fake ANCESTOR file. It should contain chevron conflict markers
+            # (<<<<<<< >>>>>>>) which should trigger conflicts between OURS and
+            # THEIRS in the merge tool.
+            ancestorPath = str(Path(into, f"[NO-ANCESTOR]{baseName}"))
+            shutil.copyfile(targetPath, ancestorPath)
+
+        # Create scratch file (merge tool output).
+        # Some merge tools (such as VS Code) use the contents of this file
+        # as a starting point, so copy the workdir version for this purpose.
+        scratchPath = Path(into, f"[MERGED]{baseName}")
+        shutil.copyfile(targetPath, scratchPath)
+
+        paths = MergeDriver.MergeFiles(
+            ours=oursPath,
+            theirs=theirsPath,
+            ancestor=ancestorPath,
+            scratch=str(scratchPath),
+            target=targetPath)
+
+        mergeDriver = MergeDriver(self.parentWidget(), conflict, paths)
+
+        # Keep a reference to temp dir so it doesn't vanish
+        mergeDriver._keepAroundMergeTempDir = mergeTempDir  # type: ignore[attr-defined]
+
+        return mergeDriver
+
+
+class PreviewDeltaFile(RepoTask):
+    def flow(self, df: GitDeltaFile, prefix: str, registerCallback: Callable[[CodeWindow], None]):
+        # Don't load large files
+        maxFileSize = settings.prefs.largeFileThresholdKB * 1024
+        if maxFileSize != 0 and GitDeltaFile.SupportsFastSizeBallpark:
+            ballpark = df.sizeBallpark(self.repo)
+            if maxFileSize < ballpark:
+                locale = QLocale()
+                humanSize = locale.formattedDataSize(ballpark, 1)
+                message = _("This file is very large.") + f" ({humanSize})"
+                yield from self.flowConfirm(_p("ConflictView", "Preview"), message, verb=_("Show anyway"))
+
+        # Dump the file
+        path = yield from self.flowSubtask(SaveDeltaFileAs, df, saveIntoDir=qTempDir())
+        pathObj = Path(path)
+        text = pathObj.read_text("utf-8")
+        pathObj.unlink()
+
+        ident = hash(text) ^ hash(df.path)
+
+        # Raise existing window, if any
+        if CodeWindow.activateExistingWindow(ident):
+            return
+
+        codeWindow = CodeWindow(uniqueIdentifier=ident)
+        codeWindow.setPlainText(text, df.path)
+        codeWindow.setWindowTitle(f"[{prefix}] {Path(df.path).name}")
+        codeWindow.show()
+        codeWindow.codeView.setFocus()
+
+        self.rw.aboutToDelete.connect(codeWindow.close)
+
+        registerCallback(codeWindow)
 
 
 class AcceptMergeConflictResolution(RepoTask):
@@ -372,7 +518,7 @@ class AcceptMergeConflictResolution(RepoTask):
 
     def flow(self, mergeDriver: MergeDriver):
         self.epilog.effects |= TaskEffects.Workdir
-        path = mergeDriver.relativeTargetPath
+        path = mergeDriver.conflict.ours.path
         mergeDriver.copyScratchToTarget()
         mergeDriver.deleteNow()
         yield from self.flowCallGit("add", "--force", "--", path)
@@ -383,28 +529,39 @@ class AcceptMergeConflictResolution(RepoTask):
 
 
 class ApplyPatchFile(RepoTask):
-    def flow(self, reverse: bool = False, path: str = ""):
-        if reverse:
-            verb, title = _("revert"), _("Revert patch file")
-        else:
-            verb, title = _("apply"), _("Apply patch file")
-
-        patchFileCaption = _("Patch file")
-        allFilesCaption = _("All files")
-
-        if not path:
-            qfd = PersistentFileDialog.openFile(
-                self.parentWidget(), "OpenPatch", title,
-                filter=f"{patchFileCaption} (*.patch);;{allFilesCaption} (*)")
-            path = yield from self.flowFileDialog(qfd)
-
-        question = _("Do you want to {verb} patch file {path}?",
-                     verb=btag(verb), path=bquoe(os.path.basename(path)))
-
-        yield from ApplyPatchFile.do(self, reverse, -1, path, title, question)
+    def flow(self, path: str = ""):
+        yield from ApplyPatchFile.do(self, path=path)
 
     @staticmethod
-    def do(task: RepoTask, reverse: bool, context: int, path: str, title: str, question: str):
+    def do(
+            task: RepoTask,
+            path: str = "",
+            reverse: bool = False,
+            context: int = -1,
+            title: str = "",
+            question: str = "",
+    ):
+        # Fallback title
+        title = title or task.name()
+
+        # If no path, bring up file dialog
+        if not path:
+            patchFileCaption = _("Patch file")
+            allFilesCaption = _("All files")
+
+            qfd = PersistentFileDialog.openFile(
+                task.parentWidget(), "OpenPatch", title,
+                filter=f"{patchFileCaption} (*.patch);;{allFilesCaption} (*)")
+            path = yield from task.flowFileDialog(qfd)
+
+        # Fallback question
+        if not question:
+            verb = _("revert") if reverse else _("apply")
+            basename = Path(path).name
+            question = _("Do you want to {verb} patch file {path}?",
+                         verb=btag(verb), path=bquoe(basename))
+
+        # Build command
         stem = [
             "apply",
             *argsIf(reverse, "--reverse"),
@@ -443,9 +600,9 @@ class ApplyPatchFile(RepoTask):
                                 "{n} files modified in the working directory.", n=numFiles)
 
 
-class ApplyPatchFileReverse(ApplyPatchFile):
+class ApplyPatchFileReverse(RepoTask):
     def flow(self, path: str = ""):
-        yield from ApplyPatchFile.flow(self, reverse=True, path=path)
+        yield from ApplyPatchFile.do(self, path=path, reverse=True)
 
 
 class ApplyPatchData(RepoTask):
@@ -462,7 +619,13 @@ class ApplyPatchData(RepoTask):
         tempPatch.close()
         path = tempPatch.fileName()
 
-        yield from ApplyPatchFile.do(self, reverse, context, path, title, question)
+        yield from ApplyPatchFile.do(
+            self,
+            path=path,
+            reverse=reverse,
+            context=context,
+            title=title,
+            question=question)
 
 
 class RestoreRevisionToWorkdir(RepoTask):
@@ -470,11 +633,11 @@ class RestoreRevisionToWorkdir(RepoTask):
         if old:
             preposition = _p("preposition slotted into '...BEFORE this commit'", "before")
             diffFile = delta.old
-            delete = delta.status == "A"
+            delete = delta.status == GitStatus.Added
         else:
             preposition = _p("preposition slotted into '...AT this commit'", "at")
             diffFile = delta.new
-            delete = delta.status == "D"
+            delete = delta.status == GitStatus.Deleted
 
         path = self.repo.in_workdir(diffFile.path)
         pathObj = Path(path)
@@ -503,13 +666,112 @@ class RestoreRevisionToWorkdir(RepoTask):
         if delete:
             pathObj.unlink()
         else:
-            data = diffFile.read(self.repo)
-            pathObj.parent.mkdir(parents=True, exist_ok=True)
-            pathObj.write_bytes(data)
-            pathObj.chmod(diffFile.mode)
+            assert diffFile.sourceCommit not in [None, NULL_OID]
+            yield from self.flowCallGit(
+                "restore",
+                "--progress",
+                f"--source={diffFile.sourceCommit}",
+                "--",
+                diffFile.path)
 
         self.epilog.status = _("File {path} {processed}.", path=tquoe(diffFile.path), processed=actionVerb)
         self.epilog.jumpTo = NavLocator.inUnstaged(diffFile.path)
+
+
+class SaveDeltaFileAs(RepoTask):
+    def flow(self, file: GitDeltaFile, saveIntoDir: str = "", prefix: str = ""):
+        dfPath = Path(file.path)
+        suggStem = prefix + dfPath.stem
+
+        if file.source == GitDeltaSource.Commit:
+            assert file.sourceCommit not in [None, NULL_OID]
+            suggStem += f"@{shortHash(file.sourceCommit)}"
+            catFileArgs = ["--filters", f"{file.sourceCommit}:{file.path}"]  # --filters for LFS awareness
+        elif file.source == GitDeltaSource.Index:
+            catFileArgs = ["--filters", f":{file.path}"]  # --filters for LFS awareness
+        elif file.source == GitDeltaSource.Unknown:  # Most likely from GitConflict
+            assert file.isIdValid()
+            catFileArgs = ["blob", str(file.id)]
+        else:
+            raise NotImplementedError()
+
+        suggExt = dfPath.suffix
+        suggName = suggStem + suggExt
+
+        if saveIntoDir:
+            targetStr = withUniqueSuffix(suggStem, ext=suggExt, reserved=lambda s: Path(saveIntoDir, s).exists())
+            targetStr = str(Path(saveIntoDir, targetStr))
+        else:
+            qfd = PersistentFileDialog.saveFile(self.parentWidget(), "SaveFile", _("Save file revision as"), suggName)
+            targetStr = yield from self.flowFileDialog(qfd)
+        target = Path(targetStr)
+
+        driver = yield from self.flowCallGit("cat-file", *catFileArgs)
+
+        assert not driver._stdout, "stdout consumed prematurely"
+        data = driver.readAllStandardOutput().data()
+        target.write_bytes(data)
+
+        if file.mode == FileMode.BLOB_EXECUTABLE:
+            mode = 0o100 | target.lstat().st_mode
+            target.lchmod(mode)
+
+        return str(target)
+
+
+class SaveRevisionAs(RepoTask):
+    def flow(self, delta: GitDelta, old: bool, saveIntoDir: str = "", prefix: str = ""):
+        if old:
+            diffFile = delta.old
+            if delta.status == GitStatus.Added:
+                raise AbortTask(_("This file didn’t exist before the commit."))
+        else:
+            diffFile = delta.new
+            if delta.status == GitStatus.Deleted:
+                raise AbortTask(_("This file was deleted by the commit."))
+
+        outPath = yield from self.flowSubtask(SaveDeltaFileAs, diffFile, saveIntoDir, prefix)
+        return outPath
+
+
+class OpenRevisionInEditor(RepoTask):
+    def flow(self, delta: GitDelta, old: bool):
+        path = yield from self.flowSubtask(SaveRevisionAs, delta, old, qTempDir())
+        assert isinstance(path, str)
+
+        ToolProcess.startTextEditor(self.parentWidget(), path)
+
+
+class OpenInDiffTool(RepoTask):
+    def flow(self, delta: GitDelta):
+        if delta.new.isId0():
+            raise FileNotFoundError(_("Can’t open external diff tool on a deleted file."))
+
+        if delta.old.isId0():
+            raise FileNotFoundError(_("Can’t open external diff tool on a new file."))
+
+        into = qTempDir()
+
+        def dump(file: GitDeltaFile, prefix: str):
+            path = yield from self.flowSubtask(SaveDeltaFileAs, file, saveIntoDir=into, prefix=prefix)
+            return path
+
+        if delta.source == GitDeltaSource.Dirty:
+            # Unstaged: compare indexed state to workdir file
+            oldPath = yield from dump(delta.old, "[INDEXED]")
+            newPath = self.repo.in_workdir(delta.new.path)
+        elif delta.source == GitDeltaSource.Index:
+            # Staged: compare HEAD state to indexed state
+            oldPath = yield from dump(delta.old, "[HEAD]")
+            newPath = yield from dump(delta.new, "[STAGED]")
+        elif delta.source == GitDeltaSource.Commit:
+            # Committed: compare parent state to this commit
+            oldPath = yield from dump(delta.old, "[OLD]")
+            newPath = yield from dump(delta.new, "[NEW]")
+        else:
+            raise NotImplementedError(f"unsupported source {delta.source}")
+
+        return ToolProcess.startDiffTool(self.parentWidget(), oldPath, newPath)
 
 
 class AbortMerge(RepoTask):
@@ -553,7 +815,7 @@ class AbortMerge(RepoTask):
                 "Cannot {verb} right now, because {n} files contain both staged and unstaged changes.",
                 n=len(exc.file_exceptions), verb=clause)
             exc.message += " " + _("Please unstage the changes and try again.")
-            raise exc
+            raise  # re-raise MultiFileError
 
         lines = [_("Do you want to {0}?", clause)]
 
@@ -566,7 +828,7 @@ class AbortMerge(RepoTask):
                 lines.append(_("All <b>staged</b> changes will be lost."))
             lines.append(_n("This file will be reset:", "{n} files will be reset:", len(abortList)))
 
-        yield from self.flowConfirm(title=title, text=paragraphs(lines), verb=englishTitleCase(title),
+        yield from self.flowConfirm(title=title, text=paragraphs(*lines), verb=englishTitleCase(title),
                                     detailList=[escape(f) for f in abortList])
 
         self.epilog.effects |= TaskEffects.DefaultRefresh

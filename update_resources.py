@@ -8,7 +8,6 @@
 import argparse
 import datetime
 import difflib
-import html
 import json
 import os
 import re
@@ -17,6 +16,7 @@ import subprocess
 import sys
 import textwrap
 from contextlib import suppress
+from gettext import GNUTranslations
 from pathlib import Path
 
 import pygit2
@@ -30,6 +30,25 @@ LANG_TEMPLATE = os.path.join(LANG_DIR, "gitfourchette.pot")
 
 FORCE = False
 LANG_FILTER = "*"
+
+# Language .mo files are not included if the .po file is below this completion percentage.
+LANG_MIN_PERCENT_COMPLETE = 5
+
+WEBLATE_LANGUAGES = {
+    "Chinese (Simplified Han script)": "zh_Hans",
+    "Chinese (Traditional Han script)": "zh_Hant",
+    "Czech": "cs",
+    "French": "fr",
+    "German": "de",
+    "Italian": "it",
+    "Korean": "ko",
+    "Portuguese (Brazil)": "pt_BR",
+    "Portuguese": "pt",
+    "Russian": "ru",
+    "Spanish": "es",
+    "Turkish": "tr",
+    "Ukrainian": "uk",
+}
 
 
 def makeParser():
@@ -179,8 +198,8 @@ def compileUi(uic: str, uiPath: Path, pyPath: Path, force=False, cleanupOutput=T
 
     elif "from PyQt" in text:
         # Clean up pyuic6 output (pyqt6, generated code is compatible with pyside6 too)
-        text = re.sub(r"^from PyQt[56] import .+$", myImport, text, count=1, flags=re.M)
-        text = re.sub(r"_translate(?=\(\")", "_p", text, flags=re.M)
+        text = re.sub(r"^from PyQt[56] import .+$", myImport, text, count=1, flags=re.MULTILINE)
+        text = re.sub(r"_translate(?=\(\")", "_p", text, flags=re.MULTILINE)
 
         nukePatterns = [
             # No need to spell out Qt module names with gitfourchette.qt
@@ -193,6 +212,9 @@ def compileUi(uic: str, uiPath: Path, pyPath: Path, force=False, cleanupOutput=T
             # under pytest-cov. GitFourchette doesn't need this feature anyway:
             # https://riverbankcomputing.com/static/Docs/PyQt6/signals_slots.html#connecting-slots-by-name
             r"^\s+QMetaObject\.connectSlotsByName\(.+\)\n",
+
+            # mypy is smart enough for these now
+            r"\s+# type: ignore$",
         ]
 
         ignoreDiffs = ["# Created by: PyQt6 UI code generator"]
@@ -201,8 +223,8 @@ def compileUi(uic: str, uiPath: Path, pyPath: Path, force=False, cleanupOutput=T
     elif "from PySide" in text:
         # WARNING: pyside6-uic cleanup provided here for convenience,
         # but note that the generated code incompatible with pyqt6!
-        text = re.sub(r"^from PySide6.* import \([^\)]+\)$", myImport, text, count=1, flags=re.M)
-        text = re.sub(r"QCoreApplication\.translate\((.+), None\)", r"_p(\1)", text, flags=re.M)
+        text = re.sub(r"^from PySide6.* import \([^\)]+\)$", myImport, text, count=1, flags=re.MULTILINE)
+        text = re.sub(r"QCoreApplication\.translate\((.+), None\)", r"_p(\1)", text, flags=re.MULTILINE)
         nukePatterns = [
             r"^#if QT_CONFIG\(.+\n",
             r"^#endif // QT_CONFIG\(.+\n",
@@ -217,7 +239,7 @@ def compileUi(uic: str, uiPath: Path, pyPath: Path, force=False, cleanupOutput=T
         print("Unknown uic output")
 
     for pattern in nukePatterns:
-        text = re.sub(pattern, "", text, flags=re.M)
+        text = re.sub(pattern, "", text, flags=re.MULTILINE)
 
     writeIfDifferent(pyPath, text, ignoreDiffs)
 
@@ -278,7 +300,7 @@ def updatePotTemplate():
     ]
     text = Path(LANG_TEMPLATE).read_text(encoding="utf-8")
     for pattern in nukePatterns:
-        text = re.sub(pattern, "", text, flags=re.M)
+        text = re.sub(pattern, "", text, flags=re.MULTILINE)
     Path(LANG_TEMPLATE).write_text(text, "utf-8")
 
 
@@ -324,7 +346,13 @@ def compileMoFiles():
         return int(match.group(1)) if match else 0
 
     for poPath in listPoFiles():
-        moPath: Path = poPath.with_suffix(".mo")
+        moPath = poPath.with_suffix(".mo")
+        moBackupPath = moPath.with_suffix(".mo.bak")
+
+        oldCatalog: dict = {}
+        with suppress(FileNotFoundError), open(moPath, "rb") as fp:
+            oldCatalog = GNUTranslations(fp)._catalog
+            moPath.rename(moBackupPath)
 
         msgfmt = call("msgfmt", "--no-hash", "--statistics", "-o", str(moPath), str(poPath),
                       env={"LANGUAGE": "C"}, capture_output=True)
@@ -335,14 +363,26 @@ def compileMoFiles():
         ratio = round(100.0 * complete / (complete + missing1 + missing2))
         print(f"  {poPath.stem}: {ratio}% complete | {msgfmt.stderr.strip()}")
 
-        # Remove empty po/mo files
-        if ratio <= 0:
-            print(f"*** Removing empty translation '{poPath.name}'")
-            poPath.unlink()
-            moPath.unlink()
-            continue
+        wipLanguages.append(f"{moPath.stem} {ratio}")
 
-        wipLanguages += [f"{moPath.stem} {ratio}"]
+        try:
+            # Remove nearly-empty mo files
+            if ratio <= LANG_MIN_PERCENT_COMPLETE:
+                print(f"*** Removing empty translation '{poPath.name}'")
+                moPath.unlink()
+                continue
+
+            # If none of the strings changed, keep old .mo file
+            if oldCatalog:
+                with open(moPath, "rb") as fp:
+                    newCatalog: dict = GNUTranslations(fp)._catalog
+
+                if all(oldCatalog.get(k, None) == newCatalog[k] for k in newCatalog):
+                    print(f"*** {poPath.name} unchanged, keeping old {moPath.name}")
+                    moPath.unlink()
+                    moBackupPath.rename(moPath)
+        finally:
+            moBackupPath.unlink(missing_ok=True)
 
     wipLanguages.sort()
     Path(LANG_DIR, "wip.txt").write_text("\n".join(wipLanguages) + "\n")
@@ -350,43 +390,23 @@ def compileMoFiles():
 
 def formatTranslatorCredits(jsonReportPath: str):
     blob = Path(jsonReportPath).read_bytes()
-    table = json.loads(blob)
+    originalTable = json.loads(blob)
 
-    renameLanguages = {
-        "Chinese (Simplified Han script)": "S. Chinese",
-        "Chinese (Traditional Han script)": "T. Chinese",
-    }
+    table = {}
+    contribs = {}
 
-    def formatPerson(person):
-        full = person["full_name"]
-        user = person["username"]
-        if full.casefold() == user.casefold():
-            return html.escape(full)
-        else:
-            return f"{full} ({user})"
-
-    tableRows = []
-
-    for entry in table:
+    for entry in originalTable:
         for language, people in entry.items():
-            if language == "French":  # I manage that one
+            languageCode = WEBLATE_LANGUAGES[language]
+            if languageCode == "fr":
                 continue
-            languageName = renameLanguages.get(language, language)
-            peopleList = "\n\t<br>".join(formatPerson(p) for p in people if p["username"] != "jorio")
-            totalContribs = sum(p["change_count"] for p in people)
-            row = ("<tr>\n"
-                   f"\t<td align=right>{languageName}: </td>\n"
-                   f"\t<td>{peopleList}</td>\n"
-                   "</tr>\n")
-            tableRows.append((totalContribs, row))
+            table[languageCode] = [p["full_name"] for p in people if p["username"] != "jorio"]
+            contribs[languageCode] = sum(p["change_count"] for p in people)
 
-    # Sort languages by total amount of contributions
-    tableRows.sort(reverse=True)
+    sortedKeys = sorted(table.keys(), key=lambda k: contribs[k], reverse=True)
+    table = {k: table[k] for k in sortedKeys}
 
-    allRows = ''.join(tr for _, tr in tableRows)
-    markup = f"<table>\n{allRows}</table>"
-
-    Path(LANG_DIR, "credits.html").write_text(markup)
+    Path(LANG_DIR, "credits.json").write_text(json.dumps(table, indent="\t") + "\n")
 
 
 def formatContributors():
@@ -404,7 +424,7 @@ def writeFreezeFile(qtApi: str):
     repo = pygit2.Repository(SRC_DIR)
     headCommit = repo.head.target
 
-    buildDate = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")
+    buildDate = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M")
     freezeText = textwrap.dedent(f"""\
         # BEGIN_FREEZE_CONSTS
         ####################################

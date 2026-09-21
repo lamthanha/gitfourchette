@@ -91,9 +91,6 @@ class CloneDialog(QDialog):
         # Connect protocol button to URL editor
         self.ui.protocolButton.connectTo(self.ui.urlEdit.lineEdit())
 
-        # Qt 6.8.2 inexplicably makes QSpinBoxes super tall with Breeze/Oxygen styles
-        self.ui.shallowCloneDepthSpinBox.setMaximumHeight(32)
-
         validator = ValidatorMultiplexer(self)
         validator.setGatedWidgets(self.cloneButton)
         validator.connectInput(self.ui.urlEdit.lineEdit(), self.validateUrl)
@@ -181,7 +178,9 @@ class CloneDialog(QDialog):
         # QComboBox's arrow button - which cannot be hidden - still pops up
         # something when clicked, as the user might expect.
         if not settings.history.cloneHistory:
-            clearItem: QStandardItem = urlEdit.model().item(urlEdit.count()-1)
+            itemModel = urlEdit.model()
+            assert isinstance(itemModel, QStandardItemModel)
+            clearItem: QStandardItem = itemModel.item(urlEdit.count() - 1)
             clearItem.setFlags(clearItem.flags() & ~Qt.ItemFlag.ItemIsEnabled)
 
         self.ui.urlEdit.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -207,7 +206,7 @@ class CloneDialog(QDialog):
         # Re-translate text for correct plural form
         text = _n("&Shallow clone: Fetch up to {n} commit per branch",
                   "&Shallow clone: Fetch up to {n} commits per branch", depth)
-        parts = re.split(r"\b\d(?:.*\d)?\b", text, maxsplit=1)
+        parts = re.split(r"\d(?:.*\d)?", text, maxsplit=1)
         assert len(parts) >= 2
         self.ui.shallowCloneCheckBox.setText(parts[0].strip())
         self.ui.shallowCloneSuffix.setText(parts[1].strip())

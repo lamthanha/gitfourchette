@@ -26,40 +26,43 @@ def testParentlessCommitFileList(tempDir, mainWindow):
     assert qlvGetRowData(rw.committedFiles) == ["c/c1.txt"]
 
 
-def testSaveRevisionAtCommit(tempDir, mainWindow):
+@pytest.mark.parametrize(
+    "commit,side,path,outPath,result",
+    [
+        ("1203b03", "as of", "c/c2.txt", "c2@1203b03.txt", "c2\nc2\n"),
+        ("1203b03", "before", "c/c2.txt", "c2@bab66b4.txt", "c2\n"),
+        ("c9ed7bf", "as of", "c/c2-2.txt", None, "file.+deleted by.+commit"),
+        ("f7c2153", "as of", "master.txt", "[+x]master@f7c2153.txt", "now executable\n"),
+        ("f7c2153", "before", "master.txt", "master@c9ed7bf.txt", "On master\nOn master\n"),
+    ])
+def testSaveFileRevision(tempDir, mainWindow, commit, side, path, outPath, result):
     wd = unpackRepo(tempDir)
+    shell("""
+        chmod +x master.txt
+        echo 'now executable' > master.txt
+        git commit -am 'make master.txt executable'
+    """, wd)
+
     rw = mainWindow.openRepo(wd)
 
-    oid = Oid(hex="1203b03dc816ccbb67773f28b3c19318654b0bc8")
-    rw.jump(NavLocator.inCommit(oid, "c/c2.txt"), check=True)
+    oid = rw.repo[commit].peel(Commit).id
+    rw.jump(NavLocator.inCommit(oid, path), check=True)
 
-    triggerContextMenuAction(rw.committedFiles.viewport(), "save.+copy/as of.+commit")
+    triggerContextMenuAction(rw.committedFiles.viewport(), f"save.+copy/{side}.+commit")
+
+    if outPath is None:
+        acceptQMessageBox(rw, result)
+        return
+
     acceptQFileDialog(rw, "save.+revision as", tempDir.name, useSuggestedName=True)
-    assert b"c2\nc2\n" == readFile(f"{tempDir.name}/c2@1203b03.txt")
 
+    executable = outPath.startswith("[+x]")
+    outPath = outPath.removeprefix("[+x]")
 
-def testSaveRevisionBeforeCommit(tempDir, mainWindow):
-    wd = unpackRepo(tempDir)
-    rw = mainWindow.openRepo(wd)
+    assert readTextFile(f"{tempDir.name}/{outPath}") == result
 
-    oid = Oid(hex="1203b03dc816ccbb67773f28b3c19318654b0bc8")
-    rw.jump(NavLocator.inCommit(oid, "c/c2.txt"), check=True)
-
-    triggerContextMenuAction(rw.committedFiles.viewport(), "save.+copy/before.+commit")
-    acceptQFileDialog(rw, "save.+revision as", tempDir.name, useSuggestedName=True)
-    assert b"c2\n" == readFile(f"{tempDir.name}/c2@before-1203b03.txt")
-
-
-def testSaveOldRevisionOfDeletedFile(tempDir, mainWindow):
-    wd = unpackRepo(tempDir)
-    rw = mainWindow.openRepo(wd)
-
-    commitId = Oid(hex="c9ed7bf12c73de26422b7c5a44d74cfce5a8993b")
-    rw.jump(NavLocator.inCommit(commitId, "c/c2-2.txt"), check=True)
-
-    # c2-2.txt was deleted by the commit. Expect a warning about this.
-    triggerContextMenuAction(rw.committedFiles.viewport(), r"save.+copy/as of.+commit")
-    acceptQMessageBox(rw, r"file.+deleted by.+commit")
+    mode = Path(f"{tempDir.name}/{outPath}").lstat().st_mode
+    assert bool(mode & 0o100) == executable
 
 
 @pytest.mark.parametrize(
@@ -70,37 +73,56 @@ def testSaveOldRevisionOfDeletedFile(tempDir, mainWindow):
         ("42e4e7c", "before", "c/c1.txt", "[DEL]"),  # delete file
         ("c9ed7bf", "before", "c/c2-2.txt", "c2\nc2\n"),  # undo deletion
         ("c9ed7bf", "as of", "c/c2-2.txt", "[NOP]"),  # no-op
+        ("d2c634a", "as of", "[+x]master.txt", "now executable\n"),  # executable flag
+        ("d2c634a", "as of", "my_symlink", "a1\n"),
     ])
 def testRestoreRevisionAtCommit(tempDir, mainWindow, commit, side, path, result):
     wd = unpackRepo(tempDir)
+    shell("""
+        echo 'different' > c/c1.txt
+        echo 'now executable' > master.txt
+        chmod +x master.txt
+        ln -s a/a1 my_symlink
+        git add .
+        git commit -m 'edit c1.txt, +x master.txt, add symlink'
 
-    with RepoContext(wd) as repo:
-        writeFile(f"{wd}/c/c1.txt", "different\n")
-        repo.index.add("c/c1.txt")
-        repo.create_commit_on_head("dummy", TEST_SIGNATURE, TEST_SIGNATURE)
+        chmod -x master.txt
+        ln -sf b/b1.txt my_symlink
+        git add .
+        git commit -m '-x master.txt, change symlink'
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
+
+    executable = path.startswith("[+x]")
+    path = path.removeprefix("[+x]")
+    pathObj = Path(f"{wd}/{path}")
 
     oid = rw.repo[commit].peel(Commit).id
     loc = NavLocator.inCommit(oid, path)
     rw.jump(loc, check=True)
 
-    # Make sure parent directories are recreated
+    # Make sure parent directories of c/c*.txt are recreated
     if result not in ["[NOP]", "[DEL]"]:
         shutil.rmtree(f"{wd}/c")
 
     triggerContextMenuAction(rw.committedFiles.viewport(), f"restore/{side}.+commit")
     if result == "[NOP]":
         acceptQMessageBox(rw, "working copy.+already matches.+revision")
-    else:
-        acceptQMessageBox(rw, "restore")
-        if result == "[DEL]":
-            assert not os.path.exists(f"{wd}/{path}")
-        else:
-            assert result.encode() == readFile(f"{wd}/{path}")
+        return
 
-        # Make sure we've jumped to the file in the workdir
-        assert NavLocator.inUnstaged(path).isSimilarEnoughTo(rw.navLocator)
+    acceptQMessageBox(rw, "restore")
+
+    # Make sure we've jumped to the file in the workdir
+    assert NavLocator.inUnstaged(path).isSimilarEnoughTo(rw.navLocator)
+
+    if result == "[DEL]":
+        assert not pathObj.exists()
+        return
+
+    assert result.encode() == readFile(f"{wd}/{path}")
+    mode = pathObj.stat().st_mode
+    assert bool(mode & 0o100) == executable
 
 
 def testRevertCommittedFile(tempDir, mainWindow):
@@ -126,14 +148,11 @@ def testRevertDeletedFile(tempDir, mainWindow):
     contents = "a1\n"
 
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        Path(f"{wd}/{path}").unlink()
-        repo.index.add_all()
-        oid = repo.create_commit_on_head("test delete", TEST_SIGNATURE, TEST_SIGNATURE)
+    shell(f"git rm {path} && git commit -m'test delete'", wd)
 
     rw = mainWindow.openRepo(wd)
-    assert not Path(f"{wd}/{path}").exists()
-    rw.jump(NavLocator.inCommit(oid, path), check=True)
+    assert not Path(wd, path).exists()
+    rw.jump(NavLocator.inCommit(rw.repo.head_commit_id, path), check=True)
     triggerContextMenuAction(rw.committedFiles.viewport(), "revert")
     acceptQMessageBox(rw, "revert.+patch")
     assert NavLocator.inUnstaged(path).isSimilarEnoughTo(rw.navLocator)
@@ -146,15 +165,12 @@ def testRevertRenamedFile(tempDir, mainWindow):
     contents = "a1\n"
 
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        Path(f"{wd}/{path1}").rename(f"{wd}/{path2}")
-        repo.index.add_all()
-        oid = repo.create_commit_on_head("test rename", TEST_SIGNATURE, TEST_SIGNATURE)
+    shell(f"git mv {path1} {path2} && git commit -m'test rename'", wd)
 
     rw = mainWindow.openRepo(wd)
-    assert not Path(f"{wd}/{path1}").exists()
-    assert Path(f"{wd}/{path2}").exists()
-    rw.jump(NavLocator.inCommit(oid, path2), check=True)
+    assert not Path(wd, path1).exists()
+    assert Path(wd, path2).exists()
+    rw.jump(NavLocator.inCommit(rw.repo.head_commit_id, path2), check=True)
     triggerContextMenuAction(rw.committedFiles.viewport(), "revert")
     acceptQMessageBox(rw, "revert.+patch")
     assert NavLocator.inUnstaged(path1).isSimilarEnoughTo(rw.navLocator)
@@ -166,14 +182,11 @@ def testRevertModeChangedFile(tempDir, mainWindow):
     path = "a/a1"
 
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        Path(f"{wd}/{path}").chmod(0o777)
-        repo.index.add_all()
-        oid = repo.create_commit_on_head("test chmod", TEST_SIGNATURE, TEST_SIGNATURE)
+    shell(f"chmod 777 {path} && git commit -am'test chmod'", wd)
 
     rw = mainWindow.openRepo(wd)
     assert fileHasUserExecutableBit(f"{wd}/{path}")
-    rw.jump(NavLocator.inCommit(oid, path), check=True)
+    rw.jump(NavLocator.inCommit(rw.repo.head_commit_id, path), check=True)
     triggerContextMenuAction(rw.committedFiles.viewport(), "revert")
     acceptQMessageBox(rw, "revert.+patch")
     assert NavLocator.inUnstaged(path).isSimilarEnoughTo(rw.navLocator)
@@ -183,7 +196,7 @@ def testRevertModeChangedFile(tempDir, mainWindow):
 def testCannotRevertCommittedFileIfNowDeleted(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     rw = mainWindow.openRepo(wd)
-    assert not os.path.exists(f"{wd}/c/c2.txt")
+    assert not Path(wd, "c/c2.txt").exists()
 
     commitId = Oid(hex="1203b03dc816ccbb67773f28b3c19318654b0bc8")
     rw.jump(NavLocator.inCommit(commitId, "c/c2.txt"), check=True)
@@ -200,9 +213,7 @@ def testRefreshKeepsMultiFileSelection(tempDir, mainWindow, context):
     for i in range(N):
         writeFile(f"{wd}/UNSTAGED{i}", f"dirty{i}")
         writeFile(f"{wd}/STAGED{i}", f"staged{i}")
-    with RepoContext(wd) as repo:
-        repo.index.add_all([f"STAGED{i}" for i in range(N)])
-        repo.index.write()
+    shell("git add STAGED*", wd)
 
     rw = mainWindow.openRepo(wd)
     fl = rw.diffArea.fileListByContext(context)
@@ -317,14 +328,13 @@ def testSearchFileListElidedTerm(tempDir, mainWindow):
 
 def testSearchEmptyFileList(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        oid = repo.create_commit_on_head("EMPTY COMMIT")
+    shell("git commit --allow-empty -m'EMPTY COMMIT'", wd)
 
     rw = mainWindow.openRepo(wd)
     fileList = rw.committedFiles
     searchBar = fileList.searchBar
 
-    rw.jump(NavLocator.inCommit(oid))
+    rw.jump(NavLocator.inCommit(rw.repo.head_commit_id), check=True)
     assert fileList.isVisible()
     assert not qlvGetRowData(fileList)
     fileList.setFocus()
@@ -396,7 +406,11 @@ def testReevaluateFileListSearchTermAcrossCommits(tempDir, mainWindow):
 
 def testOpenRevisionsInExternalEditor(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    writeFile(f"{wd}/a/a1", "modified in workdir")
+    shell("""
+        echo 'staged in workdir' > a/a1
+        git add a/a1
+        echo 'modified in workdir' > a/a1
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
     rw.jump(NavLocator.inCommit(Oid(hex="49322bb17d3acc9146f98c97d078513228bbf3c0"), "a/a1"), check=True)
@@ -444,8 +458,8 @@ def testOpenFileInExternalDiffTool(tempDir, mainWindow):
     triggerContextMenuAction(rw.committedFiles.viewport(), "open diff in editor-shim")
     waitForFile(scratchPath)
     scratchText = readFile(scratchPath, unlink=True).decode("utf-8")
-    assert "[OLD]b2.txt" in scratchText
-    assert "[NEW]b2.txt" in scratchText
+    assert "[OLD]b2@59706a1.txt" in scratchText
+    assert "[NEW]b2@7f82283.txt" in scratchText
 
 
 # Cover all FileList subclasses (unstaged, staged, committed)
@@ -704,7 +718,7 @@ def testFileListSpecialClickActions(tempDir, mainWindow, click, action):
     elif action == FileListClick.DiffTool:
         waitForFile(scratchPath)
         paths = readTextFile(scratchPath).strip().splitlines()
-        assert paths[0].endswith("[HEAD]a1.txt")
+        assert paths[0].endswith("[HEAD]a1@c9ed7bf.txt")
         assert paths[1].endswith("[STAGED]a1.txt")
     elif action == FileListClick.Folder:
         assert Path(wd, "a").samefile(services.lastUrlAsLocalFile())
@@ -813,9 +827,8 @@ def testConfirmBatchOperationManyFilesSelected(tempDir, mainWindow):
     rw.diffArea.dirtyFiles.selectAll()
     triggerContextMenuAction(rw.diffArea.dirtyFiles.viewport(), "open.+editor-shim")
 
-    # Accept by explicitly clicking "Yes To All" button
-    acceptQMessageBox(rw, "really open.+12 files.+in external diff tool",
-                      QMessageBox.StandardButton.YesToAll)
+    # Accept
+    acceptQMessageBox(rw, "really open.+12 files.+in editor-shim")
 
     # Dismiss errors
     acceptQMessageBox(rw, "can.t open external diff tool on a deleted file.+"
@@ -849,15 +862,13 @@ def testFileListNaturalSort(tempDir, mainWindow):
 
 def testUnstageRenamedFile(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    writeFile(f"{wd}/a.txt", "content")
 
-    with RepoContext(wd) as repo:
-        repo.index.add("a.txt")
-        repo.create_commit_on_head("initial", TEST_SIGNATURE, TEST_SIGNATURE)
-
-        os.rename(f"{wd}/a.txt", f"{wd}/b.txt")
-        repo.index.add_all()
-        repo.index.write()
+    shell("""
+        echo 'content' > a.txt
+        git add a.txt
+        git commit -m'initial'
+        git mv a.txt b.txt
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
 
@@ -874,10 +885,11 @@ def testUnstageRenamedFile(tempDir, mainWindow):
 
 def testCantStageMixedSelection(tempDir, mainWindow):
     wd = unpackRepo(tempDir, "submoroot")
-    writeFile(f"{wd}/hello.txt", "content")
 
-    with RepoContext(f"{wd}/submosub") as submoRepo:
-        submoRepo.reset(Oid(hex="6c138ceb12d6fc505ebe9015dcc48a0616e1de23"), ResetMode.HARD)
+    shell("""
+        echo 'content' > hello.txt
+        git -C ./submosub reset --hard 6c138ce
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
 
@@ -886,9 +898,7 @@ def testCantStageMixedSelection(tempDir, mainWindow):
     assert findMenuAction(menu, "can.t stage this selection in bulk")
     menu.close()
 
-    with RepoContext(wd, write_index=True) as repo:
-        repo.index.add("hello.txt")
-        repo.index.add("submosub")
+    shell("git add hello.txt submosub", wd)
     rw.refreshRepo()
 
     rw.stagedFiles.selectAll()

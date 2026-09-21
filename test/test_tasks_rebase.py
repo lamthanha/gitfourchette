@@ -16,7 +16,7 @@ def makeDivergentBranches(tempDir) -> str:
     'master': both add a commit touching clash.txt with different content.
     Leaves 'feature' checked out. Returns the workdir path."""
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch -c feature master
         echo "feature version" > clash.txt
@@ -37,7 +37,7 @@ def makeDivergentBranches(tempDir) -> str:
 
 def testRebaseOntoClean(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch -c feature master
         echo "feature only" > feature.txt
@@ -81,7 +81,7 @@ def testRebaseOntoFastForward(tempDir, mainWindow):
     # The branch has no commits of its own, but it does trail the target:
     # git fast-forwards it. That's a real operation, not "nothing to rebase".
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch -c feature master
         git switch master
@@ -106,7 +106,7 @@ def testRebaseOntoFastForwardDirty(tempDir, mainWindow):
     # Same fast-forward, dirty tree: the confirm dialog must announce the
     # fast-forward instead of claiming "0 commits will be replayed".
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch master
         echo "notes" > notes.txt
@@ -198,6 +198,7 @@ def testRebaseConflictResolveAndContinue(tempDir, mainWindow):
     rw.jump(NavLocator.inUnstaged("clash.txt"))
     assert rw.conflictView.isVisibleTo(rw)
     rw.conflictView.ui.theirsButton.click()
+    acceptQMessageBox(rw, "accept their")
 
     _bannerButton(rw, r"continue").click()
 
@@ -224,7 +225,7 @@ def testRebaseSkipCommit(tempDir, mainWindow):
 
 def testRebaseStartedOutsideApp(tempDir, mainWindow):
     wd = makeDivergentBranches(tempDir)
-    runShellScript("git rebase master || true", wd)
+    shell("git rebase master || true", wd)
     rw = mainWindow.openRepo(wd)
 
     assert rw.repo.state() in REBASE_STATES_FOR_TESTS
@@ -236,7 +237,7 @@ def testRebaseStartedOutsideApp(tempDir, mainWindow):
 
 def testRebaseAutostashPopConflict(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch master
         echo "base" > shared.txt
@@ -292,7 +293,7 @@ def testRebaseOntoBranchCheckedOutInOtherWorktree(tempDir, mainWindow):
     # sidebar entry must stay enabled even when the target branch is checked
     # out in a linked worktree (pygit2's is_checked_out is worktree-wide).
     wd = makeDivergentBranches(tempDir)
-    runShellScript("git worktree add ../linked-wt master", wd)
+    shell("git worktree add ../linked-wt master", wd)
     rw = mainWindow.openRepo(wd)
 
     node = rw.sidebar.findNodeByRef("refs/heads/master")
@@ -304,7 +305,7 @@ def testRebaseDirtyShowsDialogAndAutostashReapplies(tempDir, mainWindow):
     # A dirty worktree is the only case that shows the confirm dialog
     # (Fork-style flow); autostash must reapply the changes after the rebase.
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch master
         echo "notes" > notes.txt
@@ -341,7 +342,7 @@ def testRebaseDirtyShowsDialogAndAutostashReapplies(tempDir, mainWindow):
 
 def testRebaseBannerDetachedHead(tempDir, mainWindow):
     wd = makeDivergentBranches(tempDir)
-    runShellScript(
+    shell(
         """
         git switch --detach feature
         git rebase master || true
@@ -359,7 +360,7 @@ def testRebaseBannerDetachedHead(tempDir, mainWindow):
 
 def testRebaseOntoAncestorIsUpToDate(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch -c feature master
         echo "feature only" > feature.txt
@@ -382,7 +383,7 @@ def testRebaseOntoAncestorIsUpToDate(tempDir, mainWindow):
 
 def testRebaseDirtyAutostashUnchecked(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch master
         echo "notes" > notes.txt
@@ -431,7 +432,7 @@ def makeLinearHistory(tempDir) -> str:
     """Branch 'work' with three independent commits (each touches its own
     file), so any reordering replays cleanly. Newest commit: 'ir: three'."""
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch -c work master
         echo one > one.txt
@@ -526,7 +527,7 @@ def testInteractiveRebaseDropOnlyCommitBesideFlattenedMerge(tempDir, mainWindow)
     # single commit, and dropping it is still a real rewrite (the merge goes
     # away, the branch lands on the base).
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch -c work master
         echo one > one.txt
@@ -609,7 +610,7 @@ def makeDependentHistory(tempDir) -> str:
     """Branch 'work' where 'ir: beta' depends on 'ir: alpha' (same file),
     so dropping alpha makes beta conflict; 'ir: own' is independent."""
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch -c work master
         echo base > shared.txt
@@ -646,6 +647,7 @@ def testInteractiveRebaseConflictResolveContinue(tempDir, mainWindow):
     rw.jump(NavLocator.inUnstaged("shared.txt"))
     assert rw.conflictView.isVisibleTo(rw)
     rw.conflictView.ui.theirsButton.click()
+    acceptQMessageBox(rw, "accept their")
 
     _bannerButton(rw, r"continue").click()
 
@@ -687,7 +689,7 @@ def testInteractiveRebaseCancelDialog(tempDir, mainWindow):
 
 def testInteractiveRebaseWarnsAboutFlattenedMerges(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch -c work master
         echo one > one.txt
@@ -853,7 +855,7 @@ def testSquashDisabledForNonContiguousSelection(tempDir, mainWindow):
 
 def testSquashSelectionWithMergeAborts(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript(
+    shell(
         """
         git switch -c work master
         echo one > one.txt

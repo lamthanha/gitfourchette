@@ -6,21 +6,21 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import logging
 import os
 import shlex
 from contextlib import suppress
+from pathlib import Path
 from signal import SIGINT
 
+from gitfourchette import trtables
 from gitfourchette.application import GFApplication
+from gitfourchette.exttools.toolcommands import ToolCommands
 from gitfourchette.exttools.toolpresets import ToolPresets
 from gitfourchette.localization import *
 from gitfourchette.qt import *
 from gitfourchette.settings import prefs
 from gitfourchette.toolbox import *
-from gitfourchette.exttools.toolcommands import ToolCommands
-from gitfourchette.trtables import TrTables
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def onExternalToolProcessError(parent: QWidget, prefKey: str,
     commandString = getattr(prefs, prefKey)
     programName = ToolPresets.getCommandName(commandString)
 
-    translatedPrefKey = TrTables.prefKey(prefKey)
+    translatedPrefKey = trtables.prefKey(prefKey)
 
     title = _("Failed to start {tool}", tool=translatedPrefKey)
 
@@ -94,7 +94,7 @@ def onExternalToolProcessError(parent: QWidget, prefKey: str,
 
 
 def setUpToolCommand(parent: QWidget, prefKey: str):
-    translatedPrefKey = TrTables.prefKey(prefKey)
+    translatedPrefKey = trtables.prefKey(prefKey)
 
     title = translatedPrefKey
 
@@ -152,18 +152,23 @@ class ToolProcess(QProcess):
             self.start()
             logger.info(f"(PID {self.processId()})")
 
-    def onFinished(self, code, status):
+    def parentWidget(self) -> QWidget:
+        parent = self.parent()
+        assert isinstance(parent, QWidget)
+        return parent
+
+    def onFinished(self, code: int, status: QProcess.ExitStatus):
         logger.info(f"Process done: {code} {status}")
         self.disconnectFromParent()
         if not WINDOWS and code == 127:
             # The Flatpak distribution runs non-Flatpak commands through `env`,
             # which returns 127 if the command isn't found.
-            onExternalToolProcessError(self.parent(), self.prefKey)
+            onExternalToolProcessError(self.parentWidget(), self.prefKey)
 
-    def onErrorOccurred(self, processError):
+    def onErrorOccurred(self, processError: QProcess.ProcessError):
         logger.info(f"Process error: {processError}")
         self.disconnectFromParent()
-        onExternalToolProcessError(self.parent(), self.prefKey)
+        onExternalToolProcessError(self.parentWidget(), self.prefKey)
 
     def onParentDestroyedWhileProcessRunning(self):
         # Disconnect signals
@@ -252,8 +257,11 @@ class ToolProcess(QProcess):
             replacements={"$L": a, "$R": b})
 
     @classmethod
-    def startTerminal(cls, parent: QWidget, workdir: str, command: str = ""):
-        launcherScriptPath = ToolCommands.makeTerminalScript(workdir, command)
+    def startTerminal(cls, parent: QWidget, workdir: str, commandTokens: list[str] | None = None):
+        if commandTokens is None:
+            commandTokens = []
+
+        launcherScriptPath = ToolCommands.makeTerminalScript(workdir, commandTokens)
 
         if WINDOWS:  # Compatibility with bash.exe
             launcherScriptPath = Path(launcherScriptPath).as_posix()

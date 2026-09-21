@@ -92,6 +92,9 @@
        <property name="text">
         <string>&amp;Browse…</string>
        </property>
+       <property name="popupMode">
+        <enum>QToolButton::ToolButtonPopupMode::MenuButtonPopup</enum>
+       </property>
        <property name="toolButtonStyle">
         <enum>Qt::ToolButtonStyle::ToolButtonTextBesideIcon</enum>
        </property>
@@ -192,9 +195,6 @@
        <horstretch>0</horstretch>
        <verstretch>1</verstretch>
       </sizepolicy>
-     </property>
-     <property name="title">
-      <string/>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout">
       <item>

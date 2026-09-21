@@ -13,7 +13,6 @@ from gitfourchette.forms.commitdialog import CommitDialog
 from gitfourchette.forms.identitydialog import IdentityDialog
 from gitfourchette.forms.newtagdialog import NewTagDialog
 from gitfourchette.forms.signatureform import SignatureOverride
-from gitfourchette.gitdriver import GitDriver
 from gitfourchette.graphview.commitlogmodel import CommitLogModel, SpecialRow
 from gitfourchette.nav import NavLocator
 from gitfourchette.sidebar.sidebarmodel import SidebarItem
@@ -57,6 +56,7 @@ def testCommit(tempDir, mainWindow):
     assert headCommit.author.email == "custom.author@example.com"
     assert headCommit.author.time == QDateTime19991231.toSecsSinceEpoch()
     assert headCommit.committer.name == TEST_SIGNATURE.name
+    assert "Signed-off-by:" not in headCommit.message
 
     assert len(headCommit.parents) == 1
     diff = rw.repo.diff(headCommit.parents[0], headCommit)
@@ -474,13 +474,10 @@ def testDetachHeadOnSameCommitAsCheckedOutBranch(tempDir, mainWindow):
 
 
 def testCommitOnDetachedHead(tempDir, mainWindow):
-    wd = unpackRepo(tempDir)
-
     oid = Oid(hex='1203b03dc816ccbb67773f28b3c19318654b0bc8')
 
-    with RepoContext(wd) as repo:
-        repo.checkout_commit(oid)
-
+    wd = unpackRepo(tempDir)
+    shell(f"git checkout {oid}", wd)
     rw = mainWindow.openRepo(wd)
 
     assert rw.repo.head_is_detached
@@ -556,6 +553,7 @@ def testRevertCommitCausesConflicts(tempDir, mainWindow):
     assert findTextInWidget(rw.mergeBanner.label, "conflict")
 
     rw.conflictView.ui.theirsButton.click()
+    acceptQMessageBox(rw, "accept their")
     assert findTextInWidget(rw.mergeBanner.label, "conclude the revert")
     assert rw.repo.state() == RepositoryState.REVERT
 
@@ -565,6 +563,23 @@ def testRevertCommitCausesConflicts(tempDir, mainWindow):
     assert findTextInWidget(commitDialog.ui.summaryEditor, r"revert.+rename c.c2.txt.+c.c2-2.txt")
     commitDialog.accept()
 
+    assert rw.repo.state() == RepositoryState.NONE
+
+
+def testRevertCommitGitError(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+
+    # Dirty a file that revert would overwrite: git bails out with rc 128.
+    writeFile(f"{wd}/master.txt", "local uncommitted changes\n")
+
+    oid = Oid(hex='58be4659bb571194ed4562d04b359d26216f526e')  # "On master again"
+
+    rw = mainWindow.openRepo(wd)
+    rw.jump(NavLocator.inCommit(oid, "master.txt"), check=True)
+    triggerContextMenuAction(rw.graphView.viewport(), "revert")
+    acceptQMessageBox(rw, "do you want to revert commit 58be465")
+
+    acceptQMessageBox(rw, "would be overwritten")
     assert rw.repo.state() == RepositoryState.NONE
 
 
@@ -596,10 +611,9 @@ def testCherrypick(tempDir, mainWindow, worktree):
     if worktree:
         barePath = makeBareCopy(wd, "bareOrigin", preFetch=True)
         wd = f"{barePath}/MyCoolWorktree"
-        GitDriver.runSync("worktree", "add", wd, directory=barePath, strict=True)
+        shell(f"git worktree add {wd}", barePath)
 
-    with RepoContext(wd) as repo:
-        repo.checkout_local_branch("no-parent")
+    shell("git switch no-parent", wd)
 
     oid = Oid(hex='ac7e7e44c1885efb472ad54a78327d66bfc4ecef')  # "First a/a1"
 
@@ -648,6 +662,7 @@ def testCherrypickWithConflicts(tempDir, mainWindow):
     assert NavLocator.inUnstaged(".gitignore").isSimilarEnoughTo(rw.navLocator)
     assert rw.diffArea.conflictView.isVisible()
     rw.diffArea.conflictView.ui.theirsButton.click()
+    acceptQMessageBox(rw, "accept their")
 
     assert findTextInWidget(rw.mergeBanner.label, "cherry-picking.+commit to conclude")
 
@@ -662,13 +677,10 @@ def testCherrypickWithConflicts(tempDir, mainWindow):
 
 
 def testCherrypickEditAuthor(tempDir, mainWindow):
-    wd = unpackRepo(tempDir)
-
-    with RepoContext(wd) as repo:
-        repo.checkout_local_branch("no-parent")
-
     oid = Oid(hex='ac7e7e44c1885efb472ad54a78327d66bfc4ecef')  # "First a/a1"
 
+    wd = unpackRepo(tempDir)
+    shell("git switch no-parent", wd)
     rw = mainWindow.openRepo(wd)
 
     rw.jump(NavLocator.inCommit(oid))
@@ -706,14 +718,32 @@ def testCherrypickDud(tempDir, mainWindow):
     assert rw.repo.state() == RepositoryState.NONE
 
 
-def testAbortCherrypick(tempDir, mainWindow):
+def testCherrypickGitError(tempDir, mainWindow):
+    """Cherry-pick failing with an unexpected exit code must report Git's own
+    error message instead of raising an opaque NotImplementedError."""
     wd = unpackRepo(tempDir)
+    shell("git switch no-parent", wd)
 
-    with RepoContext(wd) as repo:
-        repo.checkout_local_branch("no-parent")
+    # Dirty a file that the cherry-pick would overwrite: git bails out with rc 128.
+    writeFile(f"{wd}/a/a1.txt", "local uncommitted changes\n")
 
     oid = Oid(hex='ac7e7e44c1885efb472ad54a78327d66bfc4ecef')  # "First a/a1"
 
+    rw = mainWindow.openRepo(wd)
+    rw.jump(NavLocator.inCommit(oid))
+    triggerContextMenuAction(rw.graphView.viewport(), "cherry")
+    acceptQMessageBox(rw, "do you want to apply.+changes from.+ac7e7e4")
+
+    qmb = findQMessageBox(rw, "would be overwritten")
+    qmb.accept()
+    assert rw.repo.state() == RepositoryState.NONE
+
+
+def testAbortCherrypick(tempDir, mainWindow):
+    oid = Oid(hex='ac7e7e44c1885efb472ad54a78327d66bfc4ecef')  # "First a/a1"
+
+    wd = unpackRepo(tempDir)
+    shell("git switch no-parent", wd)
     rw = mainWindow.openRepo(wd)
 
     rw.jump(NavLocator.inCommit(oid))
@@ -744,8 +774,7 @@ def testNewTag(tempDir, mainWindow):
 
     # Nuke remotes for coverage of the no-remote code path.
     # (See also testPushTagOnCreate)
-    with RepoContext(wd) as repo:
-        repo.remotes.delete("origin")
+    shell("git remote remove origin", wd)
 
     rw = mainWindow.openRepo(wd)
     assert newTag not in rw.repo.listall_tags()
@@ -772,9 +801,10 @@ def testForceNewTag(tempDir, mainWindow):
 
     # Nuke remotes for coverage of the no-remote code path.
     # (See also testPushTagOnCreate)
-    with RepoContext(wd) as repo:
-        repo.remotes.delete("origin")
-        repo.create_reference(RefPrefix.TAGS + newTag, firstCommit)
+    shell(f"""
+        git remote remove origin
+        git tag {newTag} {firstCommit}
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
     assert newTag in rw.repo.listall_tags()
@@ -812,8 +842,7 @@ def testDeleteTag(tempDir, mainWindow, method):
 
     # Nuke remotes for coverage of the no-remote code path.
     # (See also testPushDeleteTag)
-    with RepoContext(wd) as repo:
-        repo.remotes.delete("origin")
+    shell("git remote remove origin", wd)
 
     rw = mainWindow.openRepo(wd)
     assert tagToDelete in rw.repo.listall_tags()
@@ -831,6 +860,67 @@ def testDeleteTag(tempDir, mainWindow, method):
 
     findQDialog(rw, "delete tag").accept()
     assert tagToDelete not in rw.repo.listall_tags()
+
+
+def testSignOffAddsSignedOffByLine(tempDir, mainWindow):
+    # Stage a change and open the commit dialog
+    wd = unpackRepo(tempDir)
+    writeFile(f"{wd}/signed.txt", "signed change\n")
+    rw = mainWindow.openRepo(wd)
+    qlvClickNthRow(rw.dirtyFiles, 0)
+    QTest.keyPress(rw.dirtyFiles, Qt.Key.Key_Return)
+    rw.diffArea.commitButton.click()
+
+    # Create a commit with sign-off
+    dialog = findQDialog(rw, "commit", t=CommitDialog)
+    dialog.ui.summaryEditor.setText("Commit with sign-off")
+
+    signoffAction: QAction = dialog.ui.signoffButton.actions()[0]
+    assert findTextInWidget(signoffAction, "Signed-off-by")
+    assert not signoffAction.isChecked()
+    signoffAction.trigger()
+    assert signoffAction.isChecked()
+
+    dialog.accept()
+
+    # Commit should have a Signed-off-by line
+    headCommit = rw.repo.head_commit
+    assert "Signed-off-by:" in headCommit.message
+
+
+@pytest.mark.parametrize("hookName", [".git/hooks/pre-commit", ".git/hooks/commit-msg"])
+def testBypassCommitHooks(tempDir, mainWindow, hookName):
+    wd = unpackRepo(tempDir)
+
+    shell(f"""
+        echo "#!/usr/bin/env bash\necho 'hello from hook'\nexit 1" > {hookName}
+        chmod +x {hookName}
+        echo whatever >> master.txt
+        git add master.txt
+    """, wd)
+
+    rw = mainWindow.openRepo(wd)
+
+    # Attempt to create a commit, but don't bypass the hooks (enabled by default)
+    rw.diffArea.commitButton.click()
+    dialog = findQDialog(rw, "commit", t=CommitDialog)
+    dialog.ui.summaryEditor.setText("bypass commit hooks")
+    assert dialog.ui.hookButton.isVisible()
+    assert re.search(r"hook.+will run", dialog.ui.hookButton.toolTip(), re.IGNORECASE)
+    dialog.accept()
+    acceptQMessageBox(rw, "git.+exited with code 1.+hello from hook")
+
+    # Create a commit, bypass the hooks
+    rw.diffArea.commitButton.click()
+    dialog = findQDialog(rw, "commit", t=CommitDialog)
+    assert dialog.ui.hookButton.isVisible()
+    action = dialog.ui.hookButton.actions()[0]
+    action.trigger()
+    assert re.search(r"bypassing.+hook", dialog.ui.hookButton.toolTip(), re.IGNORECASE)
+    dialog.accept()
+
+    headCommit = rw.repo.head_commit
+    assert "bypass commit hooks" in headCommit.message
 
 
 @pytest.mark.parametrize("method", ["sidebarmenu", "sidebarkey", "sidebardclick"])

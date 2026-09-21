@@ -27,9 +27,10 @@ class RecolorSvgIconEngine(QIconEngine):
         background = QColor(0xFFFFFF)
         foreground = QColor(0x000000)
         highlight = QColor(0x00FFFF)
-        mainColor = QColor(0xFF00FF)
+        mainColor = QColor(0xFF00FF if APP_DEBUG else 0x808080)
         preferDarkVariants = False
         systemFont = "sans-serif"
+        initialized = False
 
         @classmethod
         def refresh(cls):
@@ -40,13 +41,18 @@ class RecolorSvgIconEngine(QIconEngine):
             cls.mainColor = mixColors(cls.background, cls.foreground, .58)
             cls.preferDarkVariants = cls.background.lightness() < cls.foreground.lightness()
             cls.systemFont = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family()
+            cls.initialized = True
 
-    def __init__(self, iconPath: str, colorTable: str = ""):
+    def __init__(self, iconPathStr: str, colorTable: str = ""):
         super().__init__()
 
+        # Initialize color scheme
+        if not RecolorSvgIconEngine.IconColors.initialized:
+            RecolorSvgIconEngine.IconColors.refresh()
+
         # Read in SVG data
-        assert iconPath.endswith(".svg")
-        iconPath = Path(iconPath)
+        iconPath = Path(iconPathStr)
+        assert iconPath.name.endswith(".svg")
         svg = iconPath.read_text("utf-8").strip()
 
         # Inject system font
@@ -72,7 +78,7 @@ class RecolorSvgIconEngine(QIconEngine):
         self.svg = svg
         self.informalIconName = iconPath.name  # for debugging
         self.basePixmapKey = hash(svg)
-        self.renderers = {}
+        self.renderers: dict[QIcon.Mode, QSvgRenderer] = {}
         self.referenceSize = QSize(0, 0)
 
         self.initVariants()
@@ -86,7 +92,7 @@ class RecolorSvgIconEngine(QIconEngine):
             QIcon.Mode.Normal: self._recolor(IC.mainColor),
             QIcon.Mode.Disabled: self._recolor(IC.mainColor, opacity=.33),
             QIcon.Mode.Selected: self._recolor(IC.highlight),
-            QIcon.Mode.SelectedInactive: self._recolor(IC.foreground),
+            QIcon.Mode.SelectedInactive: self._recolor(IC.foreground),  # type: ignore[attr-defined]
         }
         self.referenceSize = self.renderers[QIcon.Mode.Normal].defaultSize()
 

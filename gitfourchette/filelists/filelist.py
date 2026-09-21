@@ -5,28 +5,29 @@
 # -----------------------------------------------------------------------------
 
 import os
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress
 from typing import Literal
 
+from gitfourchette import trtables
 from gitfourchette import settings
 from gitfourchette.application import GFApplication
 from gitfourchette.exttools.toolprocess import ToolProcess
 from gitfourchette.exttools.usercommand import UserCommand
+from gitfourchette.filelists.filebatchtask import FileBatchTask
 from gitfourchette.filelists.filelistfilter import FileListFilter
 from gitfourchette.filelists.filelistmodel import FileListModel
 from gitfourchette.forms.searchbar import SearchBar
 from gitfourchette.gitdriver import *
+from gitfourchette.gitdriver.gitdeltafile import HexHashFFFF
 from gitfourchette.localization import *
 from gitfourchette.nav import NavLocator, NavContext, NavFlags
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.repomodel import RepoModel
-from gitfourchette.settings import FileListClick
+from gitfourchette.settings import FileListClick, getDiffToolName, getExternalEditorName
 from gitfourchette.tasks import *
-from gitfourchette.tasks.repotask import showMultiFileErrorMessage
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
 
 
 class FileListDelegate(QStyledItemDelegate):
@@ -35,7 +36,9 @@ class FileListDelegate(QStyledItemDelegate):
     """
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
-        widget: FileList = option.widget
+        widget = option.widget
+        assert isinstance(widget, FileList)
+
         isActive = bool(option.state & QStyle.StateFlag.State_Active)
         isSelected = bool(option.state & QStyle.StateFlag.State_Selected)
         colorGroup = QPalette.ColorGroup.Active if isActive else QPalette.ColorGroup.Inactive
@@ -144,7 +147,7 @@ class FileList(QListView):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.onContextMenuRequested)
 
-        flModel = FileListModel(self, navContext)
+        flModel = FileListModel(self, self.repoModel.repo, navContext)
         self.setModel(flModel)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
@@ -240,7 +243,7 @@ class FileList(QListView):
 
         def pathDisplayStyleAction(pds: PathDisplayStyle):
             return ActionDef(
-                englishTitleCase(TrTables.enum(pds)),
+                englishTitleCase(trtables.enum(pds)),
                 lambda: GFApplication.applyPrefs(pathDisplayStyle=pds),
                 checkState=settings.prefs.pathDisplayStyle == pds)
 
@@ -290,7 +293,7 @@ class FileList(QListView):
         # Scan deltas for mode changes
         for delta in deltas:
             # Scan for Modified, Renamed, or Copied
-            if delta.status not in "MRC":
+            if delta.status not in [GitStatus.Modified, GitStatus.Renamed, GitStatus.Copied]:
                 continue
 
             # Skip if mode didn't change
@@ -341,7 +344,9 @@ class FileList(QListView):
 
             ActionDef(
                 _n("Edit &HEAD Version in {tool}", "Edit &HEAD Versions in {tool}", n=n, tool=settings.getExternalEditorName()),
-                self.openHeadRevision),
+                self.openHeadRevision,
+                enabled=any(not d.status.isAddedOrUntracked for d in deltas),
+            ),
         ]
 
     def contextMenuActionBlame(self, deltas: list[GitDelta]) -> ActionDef:
@@ -349,7 +354,7 @@ class FileList(QListView):
         if len(deltas) == 1:
             delta = deltas[0]
             assert self.navContext == NavContext.fromGitDeltaSource(delta.source)
-            isEnabled = (not delta.source.isWorkdir()) or (delta.status not in "?A")
+            isEnabled = (not delta.source.isWorkdir()) or (not delta.status.isAddedOrUntracked)
 
         return ActionDef(
             englishTitleCase(OpenBlame.name()) + "\u2026",
@@ -361,90 +366,44 @@ class FileList(QListView):
 
     # -------------------------------------------------------------------------
 
-    def confirmBatch(self, callback: Callable[[GitDelta], None], title: str, prompt: str, threshold: int = 3):
+    def confirmBatch(self, callback: FileBatchTask.UnitFunc, title: str, prompt: str):
         deltas = list(self.selectedDeltas())
-        numFiles = len(deltas)
-
-        def runBatch():
-            errors = MultiFileError()
-
-            for delta in deltas:
-                try:
-                    callback(delta)
-                    errors.add_file_success()
-                except (OSError,  # typically FileNotFoundError
-                        LfsObjectCacheMissingError
-                        ) as exc:
-                    errors.add_file_error(delta.new.path, exc)
-
-            if errors:
-                showMultiFileErrorMessage(self, errors, title)
-
-        if numFiles <= threshold:
-            runBatch()
-            return
-
-        qmb = askConfirmation(
-            self,
-            title,
-            prompt.format(n=numFiles),
-            runBatch,
-            QMessageBox.StandardButton.YesToAll | QMessageBox.StandardButton.Cancel,
-            show=False)
-
-        addULToMessageBox(qmb, [d.new.path for d in deltas])
-
-        qmb.show()
+        FileBatchTask.invoke(self, deltas, callback, title, prompt)
 
     def openWorkdirFile(self):
-        def run(delta: GitDelta):
-            entryPath = self.repo.in_workdir(delta.new.path)
-            ToolProcess.startTextEditor(self, entryPath)
+        def run(task: RepoTask, delta: GitDelta):
+            entryPath = task.repo.in_workdir(delta.new.path)
+            ToolProcess.startTextEditor(task.parentWidget(), entryPath)
+            yield from task.flowEnterUiThread()  # dummy yield
 
-        self.confirmBatch(run, _("Open in external editor"),
-                          _("Really open <b>{n} files</b> in external editor?"))
+        toolName = getExternalEditorName()
+
+        self.confirmBatch(
+            run,
+            _("Open in {0}", toolName),
+            _("Really open [# files] in {0}?", toolName))
 
     def wantOpenInDiffTool(self):
-        self.confirmBatch(self._openInDiffTool, _("Open in external diff tool"),
-                          _("Really open <b>{n} files</b> in external diff tool?"))
+        def run(task: RepoTask, delta: GitDelta):
+            yield from task.flowSubtask(OpenInDiffTool, delta)
 
-    def _openInDiffTool(self, delta: GitDelta):
-        if delta.new.isId0():
-            raise FileNotFoundError(_("Can’t open external diff tool on a deleted file."))
+        toolName = getDiffToolName()
 
-        if delta.old.isId0():
-            raise FileNotFoundError(_("Can’t open external diff tool on a new file."))
-
-        diffDir = qTempDir()
-        repo = self.repo
-
-        if delta.source == GitDeltaSource.Dirty:
-            # Unstaged: compare indexed state to workdir file
-            oldPath = delta.old.dump(repo, diffDir, "[INDEXED]")
-            newPath = repo.in_workdir(delta.new.path)
-        elif delta.source == GitDeltaSource.Index:
-            # Staged: compare HEAD state to indexed state
-            oldPath = delta.old.dump(repo, diffDir, "[HEAD]")
-            newPath = delta.new.dump(repo, diffDir, "[STAGED]")
-        elif delta.source == GitDeltaSource.Commit:
-            # Committed: compare parent state to this commit
-            oldPath = delta.old.dump(repo, diffDir, "[OLD]")
-            newPath = delta.new.dump(repo, diffDir, "[NEW]")
-        else:
-            raise NotImplementedError(f"unsupported source {delta.source}")
-
-        return ToolProcess.startDiffTool(self, oldPath, newPath)
+        self.confirmBatch(
+            run,
+            _("Open in {0}", toolName),
+            _("Really open [# files] in {0}?", toolName))
 
     def showInFolder(self):
-        def run(delta: GitDelta):
-            path = self.repo.in_workdir(delta.new.path)
+        def run(task: RepoTask, delta: GitDelta):
+            path = task.repo.in_workdir(delta.new.path)
             path = os.path.normpath(path)  # get rid of any trailing slashes (submodules)
             if not os.path.exists(path):  # check exists, not isfile, for submodules
                 raise FileNotFoundError(_("File doesn’t exist at this path anymore."))
             showInFolder(path)
+            yield from task.flowEnterUiThread()  # dummy yield
 
-        self.confirmBatch(run, _("Open paths"),
-                          _("Really open <b>{n} folders</b>?"))
+        self.confirmBatch(run, _("Open paths"), _("Really open [# folders]?"))
 
     def copyPaths(self):
         text = '\n'.join(self.repo.in_workdir(path) for path in self.selectedPaths())
@@ -578,27 +537,23 @@ class FileList(QListView):
         elif action == FileListClick.DiffTool:
             self.wantOpenInDiffTool()
         elif action == FileListClick.Stage:
-            if self.navContext == NavContext.UNSTAGED:
-                self.stage()
-            elif self.navContext == NavContext.STAGED:
-                self.unstage()
-            else:
-                QApplication.beep()
+            self.wantStageOrUnstage()
         else:
             raise NotImplementedError(f"unknown special click action '{click}'")
 
-    def selectedDeltas(self) -> Generator[GitDelta, None, None]:
+    def selectedDeltas(self) -> Iterator[GitDelta]:
         for index in self.selectedIndexes():
             yield index.data(FileListModel.Role.Delta)
 
-    def selectedPaths(self) -> Generator[str, None, None]:
+    def selectedPaths(self) -> Iterator[str]:
         for index in self.selectedIndexes():
             yield index.data(FileListModel.Role.FilePath)
 
-    def earliestSelectedRow(self):
+    def earliestSelectedRow(self) -> int:
         try:
-            return list(self.selectedIndexes())[0].row()
-        except IndexError:
+            i = iter(self.selectedIndexes())
+            return next(i).row()
+        except StopIteration:
             return -1
 
     def savePatchAs(self):
@@ -644,12 +599,16 @@ class FileList(QListView):
         return self.flModel.deltas[row]
 
     def openHeadRevision(self):
-        def run(delta: GitDelta):
-            tempPath = delta.old.dump(self.repo, qTempDir(), "[HEAD]")
-            ToolProcess.startTextEditor(self, tempPath)
+        def run(task: RepoTask, delta: GitDelta):
+            fakeHeadFile = GitDeltaFile(delta.old.path, HexHashFFFF, source=GitDeltaSource.Commit, sourceCommit=self.repo.head_commit_id)
+            fakeHeadDelta = GitDelta(GitStatus.Modified, new=fakeHeadFile)
+            yield from task.flowSubtask(OpenRevisionInEditor, fakeHeadDelta, old=False)
 
-        self.confirmBatch(run, _("Open HEAD version of file"),
-                          _("Really open <b>{n} files</b> in external editor?"))
+        toolName = getExternalEditorName()
+        self.confirmBatch(
+            run,
+            _("Open HEAD revision"),
+            _("Really open [# files] in {0}?", toolName))
 
     def wantPartialStash(self):
         paths = set()
@@ -659,6 +618,10 @@ class FileList(QListView):
             paths.add(delta.old.path)
             paths.add(delta.new.path)
         NewStash.invoke(self, list(paths))
+
+    def wantStageOrUnstage(self):
+        # To be overridden in DirtyFiles and StagedFiles
+        QApplication.beep()
 
     def openSubmoduleTabs(self):
         for delta in self.selectedDeltas():
@@ -672,7 +635,7 @@ class FileList(QListView):
     def clearSelectionBackup(self):
         self._selectionBackup = []
 
-    def restoreSelectionBackup(self):
+    def restoreSelectionBackup(self) -> bool:
         if not self._selectionBackup:
             return False
 

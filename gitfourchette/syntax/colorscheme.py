@@ -6,18 +6,16 @@
 
 from __future__ import annotations
 from contextlib import suppress
+from typing import ClassVar
+
+import pygments.styles
+import pygments.token
 
 from gitfourchette.qt import *
 from gitfourchette.toolbox.qtutils import isDarkTheme
 from gitfourchette.toolbox.benchmark import benchmark
 
-try:
-    import pygments.styles
-    import pygments.token
-    hasPygments = True
-    Token = pygments.token.Token
-except ImportError:  # pragma: no cover
-    hasPygments = False
+Token = pygments.token.Token
 
 
 class PygmentsPresets:
@@ -28,9 +26,9 @@ class PygmentsPresets:
 
 
 class ColorScheme:
-    fallbackScheme: ColorScheme = None
-    _cachedScheme: ColorScheme = None
-    _cachedPreviews: dict[str, str] = {}
+    fallbackScheme: ClassVar[ColorScheme] = None
+    _cachedScheme: ClassVar[ColorScheme] = None
+    _cachedPreviews: ClassVar[dict[str, str]] = {}
 
     name: str
     backgroundColor: QColor
@@ -87,9 +85,6 @@ class ColorScheme:
 
     @classmethod
     def resolve(cls, name: str) -> ColorScheme:
-        if not hasPygments:  # pragma: no cover
-            return cls.fallbackScheme
-
         # Resolve style alias
         if name == PygmentsPresets.Automatic:
             name = PygmentsPresets.Dark if isDarkTheme() else PygmentsPresets.Light
@@ -136,14 +131,13 @@ class ColorScheme:
 
     @property
     def whitespaceFormat(self) -> QTextCharFormat:
-        assert hasPygments
         assert self.scheme
         return self.scheme[Token.Whitespace]
 
     @classmethod
     @benchmark
     def stylePreviews(cls, withPlugins: bool) -> dict[str, str]:
-        if not hasPygments or cls._cachedPreviews:
+        if cls._cachedPreviews:
             return cls._cachedPreviews
 
         # pygments.styles.STYLES appeared in Pygments 2.17,
@@ -162,8 +156,8 @@ class ColorScheme:
                     return QColor('#' + style.style_for_token(t)['color'])
             return QColor(Qt.GlobalColor.black)
 
-        primary = {}
-        secondary = {}
+        primary: dict[str, str] = {}
+        secondary: dict[str, str] = {}
 
         for styleName in sorted(allStyles):
             style = pygments.styles.get_style_by_name(styleName)
@@ -192,7 +186,6 @@ class ColorScheme:
 
     @classmethod
     def fillInFallback(cls, scheme: dict, tokenType) -> QTextCharFormat:
-        assert hasPygments
         assert Token in scheme
         assert tokenType not in scheme
 

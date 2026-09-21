@@ -24,6 +24,7 @@ from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.subpatch import extractSubpatch
 from gitfourchette.tasks import ApplyPatch, ApplyPatchData
+from gitfourchette.tasks.blametasks import OpenBlameToLine
 from gitfourchette.toolbox import *
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,6 @@ class DiffView(CodeView):
         self.gutter.lineShiftClicked.connect(self.selectWholeLinesTo)
         self.gutter.lineDoubleClicked.connect(self.selectClumpOfLinesAt)
         self.gutter.selectionMiddleClicked.connect(self.onMiddleClick)
-
 
     def _initRubberBandButtons(self):
         self.stageButton = QToolButton()
@@ -128,6 +128,8 @@ class DiffView(CodeView):
     @benchmark
     def replaceDocument(self, repo: Repo, delta: GitDelta, locator: NavLocator, newDoc: DiffDocument):
         assert newDoc.document is not None
+        assert isinstance(self.highlighter, DiffHighlighter)
+        assert isinstance(self.gutter, DiffGutter)
 
         # No-op if reloading same document
         if newDoc is self.currentDiffDocument:
@@ -146,6 +148,7 @@ class DiffView(CodeView):
         newDoc.document.setParent(self)
         self.setDocument(newDoc.document)
         self.highlighter.setDiffDocument(newDoc)
+        self.searchBar.reevaluateSearchTerm()
 
         # now reset defaults that are lost when changing documents
         self.refreshPrefs(changeColorScheme=False)
@@ -182,6 +185,7 @@ class DiffView(CodeView):
         try:
             lineData = self.lineData[blockNumber]
         except IndexError:
+            lineData = None
             shortHunkHeader = "???"
         else:
             clickedHunkID = lineData.hunkPos.hunkID
@@ -267,6 +271,29 @@ class DiffView(CodeView):
                     ),
                 ]
 
+        blamePreview = ""
+        allowBlameLine = (
+                lineData is not None
+                and bool(lineData.origin)
+                and not (self.currentDelta.source.isWorkdir() and self.currentDelta.status.isAddedOrUntracked)
+        )
+        if allowBlameLine:
+            assert not lineData.hunkPos.isHunkHeaderLine(), "line had truthy origin; not expecting hunk header"
+            blamePreview = lineData.text.strip()
+            if blamePreview:
+                blamePreview = elide(blamePreview, Qt.TextElideMode.ElideRight, 15)
+                blamePreview = lquo(blamePreview)
+            else:
+                blamePreview += f"-{lineData.oldLineNo}" if lineData.origin == "-" else f"+{lineData.newLineNo}"
+
+        actions += [
+            ActionDef(
+                _("Blame Line") + " " + blamePreview,
+                lambda: self.blameLine(lineData),
+                enabled=allowBlameLine,
+            ),
+        ]
+
         return actions
 
     # ---------------------------------------------
@@ -340,6 +367,9 @@ class DiffView(CodeView):
             self.unstageSelection()
         else:
             QApplication.beep()
+
+    def blameLine(self, ld: LineData):
+        OpenBlameToLine.invoke(self, self.currentDelta, ld)
 
     def stageSelection(self):
         self.fireApplyLines(PatchPurpose.Stage)

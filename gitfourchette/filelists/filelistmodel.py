@@ -9,33 +9,38 @@ from collections.abc import Iterable
 from contextlib import suppress
 from typing import Any
 
+from gitfourchette import trtables
 from gitfourchette import settings
-from gitfourchette.gitdriver import GitDelta, GitDeltaSource
+from gitfourchette.gitdriver import GitDelta, GitDeltaSource, GitStatus
 from gitfourchette.gitdriver.lfspointer import LfsPointerState
 from gitfourchette.localization import *
 from gitfourchette.nav import NavContext, NavLocator
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
 
 logger = logging.getLogger(__name__)
 
 
 def deltaModeText(om: FileMode, nm: FileMode) -> str:
-    if om != 0 and nm != 0 and om != nm:
-        # Mode change
-        if nm == FileMode.BLOB_EXECUTABLE:
-            return "+x"
-        elif om == FileMode.BLOB_EXECUTABLE:
-            return "-x"
-        elif nm != FileMode.BLOB:
-            return TrTables.shortFileModes(nm)
-        else:
-            return ""
-    elif om == 0:
-        # New file
-        return TrTables.shortFileModes(nm)
+    if nm == FileMode.UNREADABLE or nm == om:  # Deleted or unchanged mode
+        return ""
+
+    if nm == FileMode.BLOB and om == FileMode.BLOB_EXECUTABLE:
+        return "-x"
+
+    if nm == FileMode.BLOB_EXECUTABLE:
+        return "+x"
+
+    if nm == FileMode.LINK:
+        return _("link")
+
+    if nm == FileMode.TREE:
+        return _("new subtree")
+
+    if nm == FileMode.COMMIT:
+        return _("commit in subtree")
+
     return ""
 
 
@@ -56,33 +61,34 @@ def fileTooltip(
         color = mutedToolTipColorHex()
         return f"<tr><td style='color:{color}; text-align: right;'>{heading}{colon} </td><td>{caption}</td>"
 
-    if sc == 'R':
+    if sc == GitStatus.Renamed:
         text += newLine(_("old name"), escape(of.path))
         text += newLine(_("new name"), escape(nf.path))
     else:
         text += newLine(_("name"), escape(nf.path))
 
     # Status caption
-    statusCaption = TrTables.diffStatusChar(sc)
-    if sc not in '?U':  # show status char except for untracked and conflict
+    statusCaption = trtables.enum(sc)
+    # Show status char except for untracked and conflict
+    if sc not in [GitStatus.Untracked, GitStatus.Unmerged]:
         statusCaption += f" ({sc})"
-    if sc == 'U':  # conflict sides
+    if sc == GitStatus.Unmerged:  # conflict sides
         assert delta.conflict is not None
-        postfix = TrTables.enum(delta.conflict.sides)
+        postfix = trtables.enum(delta.conflict.sides)
         statusCaption += f" ({postfix})"
     text += newLine(_("status"), statusCaption)
 
     # Similarity + Old name
-    if sc == 'R':
+    if sc == GitStatus.Renamed:
         text += newLine(_("similarity"), f"{delta.similarity}%")
 
     # File Mode
-    if sc in 'DU':
+    if sc in [GitStatus.Deleted, GitStatus.Unmerged]:
         pass
-    elif sc in 'A?':
-        text += newLine(_("file mode"), TrTables.enum(nf.mode))
+    elif sc.isAddedOrUntracked:
+        text += newLine(_("file mode"), trtables.enum(nf.mode))
     elif of.mode != nf.mode:
-        text += newLine(_("file mode"), f"{TrTables.enum(of.mode)} \u2192 {TrTables.enum(nf.mode)}")
+        text += newLine(_("file mode"), f"{trtables.enum(of.mode)} \u2192 {trtables.enum(nf.mode)}")
 
     # Get mtime & size
     mTimeNS, size = -1, -1
@@ -119,7 +125,7 @@ def fileTooltip(
         text += newLine(_("modified"), timeText)
 
     # Blob/Commit IDs
-    if sc == 'U' or nf.mode == FileMode.TREE:
+    if sc == GitStatus.Unmerged or nf.mode == FileMode.TREE:
         # Hide hashes for:
         # - unmerged conflicts
         # - untracked trees: those never have a valid ID
@@ -157,6 +163,8 @@ class FileListModel(QAbstractListModel):
     fileRows: dict[str, int]
     highlightedCounterpartRow: int
 
+    repo: Repo
+
     _allDeltas: list[GitDelta]
     """ Fork: unfiltered backing store; `deltas`/`fileRows` are the filtered view. """
 
@@ -176,17 +184,14 @@ class FileListModel(QAbstractListModel):
     Does not contain paths.
     """
 
-    def __init__(self, parent: QWidget, navContext: NavContext):
+    def __init__(self, parent: QWidget, repo: Repo, navContext: NavContext):
         super().__init__(parent)
+        self.repo = repo
         self.navContext = navContext
         self.navLocator = NavLocator.Empty
         self._rebuildingFilteredRows = False
         self._filterTerm = ""  # Fork: owned by the search bar; clear() leaves it alone
         self.clear()
-
-    @property
-    def repo(self) -> Repo:
-        return self.parent().repo
 
     @property
     def parentWidget(self) -> QWidget:
@@ -249,7 +254,7 @@ class FileListModel(QAbstractListModel):
         # Fork: unfiltered delta count (rowCount() is the filtered count).
         return len(self._allDeltas)
 
-    def data(self, index: QModelIndex, role: Qt.ItemDataRole = Qt.ItemDataRole.DisplayRole) -> Any:
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         row = index.row()
         try:
             delta = self.deltas[row]
@@ -282,11 +287,7 @@ class FileListModel(QAbstractListModel):
             return text
 
         elif role == Qt.ItemDataRole.DecorationRole:
-            letter = delta.status
-            if letter == "?":  # untracked, fake A
-                letter = "A"
-            letter = letter.lower()
-            return stockIcon(f"status_{letter}")
+            return stockIcon(f"status_{delta.status.lower()}")
 
         elif role == FileListModel.Role.Decoration2:
             if settings.prefs.lfsAware:
@@ -307,10 +308,7 @@ class FileListModel(QAbstractListModel):
             isCounterpart = row == self.highlightedCounterpartRow
             return fileTooltip(self.repo, delta, isCounterpart)
 
-        elif role == Qt.ItemDataRole.SizeHintRole:
-            return QSize(-1, self.parentWidget.fontMetrics().height())
-
-        elif role == Qt.ItemDataRole.FontRole:
+        elif role == Qt.ItemDataRole.FontRole:  # noqa: SIM102
             if row == self.highlightedCounterpartRow:
                 font = self.parentWidget.font()
                 font.setUnderline(True)
@@ -346,7 +344,7 @@ class FileListModel(QAbstractListModel):
             return next(d.new.path for d in self.deltas if d.new.matchPathspec(pattern))
 
         # Try old side (but return path from *new* side)
-        with suppress(StopIteration):
+        with suppress(StopIteration):  # type: ignore[unreachable]
             return next(d.new.path for d in self.deltas if d.old.matchPathspec(pattern))
 
         return ""

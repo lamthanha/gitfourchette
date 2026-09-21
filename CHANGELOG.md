@@ -1,5 +1,58 @@
 # GitFourchette version history
 
+## 1.11.0 (2026-08-21)
+
+New features:
+
+- **Blame specific line:** Right click any line in the diff, then select "Blame Line" to find out which commit introduced this specific line.
+- **Bypass pre-commit hooks** via dedicated button in CommitDialog (git commit --no-verify). The button is only shown if your repo uses pre-commit hooks.
+- **New platform-agnostic themes** (light & dark) provide a nicer default look on non-Qt environments. You can still use any Qt styles you have installed on your system.
+
+Quality of life improvements:
+
+- Conflicts: You can now preview the entire "Ours" or "Theirs" revision with one click (eye button in ConflictView)
+- Conflicts: Operations "Keep Ours" and "Accept Theirs" now ask for your confirmation and clearly explain what is going to happen
+- CloneDialog: "Default clone location" settings are easier to access from the Browse button
+
+Bug fixes:
+
+- Blame: More accurate revlist when blaming a file in a branch that has diverged from the current branch
+- Tab names were elided too aggressively with "tab close button" on and "expand tabs" off
+
+## 1.10.0 (2026-08-01)
+
+New features:
+
+- CommitDialog: Dedicated "signoff" button (git commit --signoff)
+- Open repo workdir in external editor (from Repo menu, or by right-clicking a repo tab) (#118)
+
+Quality of life improvements:
+
+- Askpass: Better UI when connecting to an unknown host (#128)
+- Specific "No changes" message when A/B diffing two commits with the same tree
+- Conflict resolution: Improved compatibility with merge tools that write the merged file from a different process after a delay (some popular IDEs)
+
+Bug fixes:
+
+- Fix stash deletion failing when trash is disabled (#122)
+- Cherrypick/Revert: Show meaningful error message if git exits with code 128, typically "local changes would be overwritten" (#130)
+- Flatpak: Fix ssh-agent sandboxed state after changing git executable from settings
+- Subpatch extraction: Don't spill over to first line in next hunk if selection ends on hunk header (was only an issue with context lines turned off)
+- FileList: Edit HEAD Version in Editor: Get file from HEAD, not index if it has staged changes
+- Restore Revision and Save Revision As were rewritten to use git restore/git cat-file, fixing issues with restoring symlinks
+- DiffView: Reevaluate search term when switching to a different diff document
+
+Security fixes:
+
+- Custom Commands that manipulate the selected object via tokens like $FILE or $REF now safely escape the object's name before substitution. In a hostile repo, this prevents malicious filenames or ref names from injecting tokens into a Custom Command that you run on them.
+
+Maintenance & packaging notes:
+
+- Bump minimum Python version to 3.12 (previously 3.10)
+- Make Pygments a mandatory dependency (previously optional)
+- Enforce type checking with mypy (#2)
+
+
 ## 1.9.1 (2026-07-14)
 
 Quality of life improvements:

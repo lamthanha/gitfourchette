@@ -30,6 +30,7 @@ class CommitDialog(QDialog):
             emptyCommit: bool,
             gpgFlag: bool,
             gpgKey: str,
+            hooks: list[str],
             parent: QWidget):
         super().__init__(parent)
 
@@ -38,8 +39,11 @@ class CommitDialog(QDialog):
 
         self.ui = Ui_CommitDialog()
         self.ui.setupUi(self)
-
         self.ui.gpg.setup(gpgFlag, gpgKey)
+        self.ui.hookButton.setup(hooks)
+
+        for button in (self.ui.gpg, self.ui.signoffButton, self.ui.hookButton):
+            button.setAutoRaise(True)
 
         self.ui.signatureButton.setIcon(stockIcon("view-visible"))
 
@@ -56,7 +60,7 @@ class CommitDialog(QDialog):
         else:
             prompt = _("Enter commit summary")
             buttonCaption = _("Co&mmit")
-            self.setWindowTitle(_p("verb", "Commit"))
+            self.setWindowTitle(englishTitleCase(_("New commit")))
 
         warning = ""
         if repositoryState == RepositoryState.MERGE:
@@ -113,6 +117,10 @@ class CommitDialog(QDialog):
 
         # Focus on summary editor before showing
         self.ui.summaryEditor.setFocus()
+
+        # Pack the layout
+        packDialog(self)
+        self.resize(self.width(), self.minimumSizeHint().height())
 
     def sanitizeLineBreaksInSummary(self, text: str):
         if '\n' not in text:

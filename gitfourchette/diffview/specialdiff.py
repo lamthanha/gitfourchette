@@ -23,7 +23,7 @@ from gitfourchette.qt import *
 from gitfourchette.settings import WhitespaceMode
 from gitfourchette.tasks import RepoTask
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
+from gitfourchette import trtables
 
 
 # convert.c, since Git 2.37.0
@@ -72,7 +72,7 @@ class SpecialDiffError:
         self.preformatted = preformatted
         self.longform = longform
         self.links = DocumentLinks()
-        self.taskInvoker = None
+        self.taskInvoker: QObject | None = None
 
     def taskLink(self, taskClass: type[RepoTask], *args, **kwargs) -> str:
         return self.links.new(lambda: taskClass.invoke(self.taskInvoker, *args, **kwargs))
@@ -95,7 +95,7 @@ class SpecialDiffError:
             if delta.new.mode == FileMode.TREE:
                 return SpecialDiffError.treeDiff(repo, delta)
             else:
-                assert delta.status in "A?"  # added or untracked
+                assert delta.status.isAddedOrUntracked
                 message = _("New empty file.")
 
         if (newFileExists
@@ -103,7 +103,7 @@ class SpecialDiffError:
                 and newFile.id != oldFile.id
                 and settings.prefs.whitespaceMode != WhitespaceMode.Strict):
             message = _("Whitespace changes ignored. Contents otherwise identical.")
-            detailsLine = "{} {}.".format(_("Current whitespace mode:"), TrTables.enum(settings.prefs.whitespaceMode))
+            detailsLine = "{} {}.".format(_("Current whitespace mode:"), trtables.enum(settings.prefs.whitespaceMode))
             details.append(detailsLine)
 
         if oldFile.path != newFile.path:
@@ -112,7 +112,7 @@ class SpecialDiffError:
 
         if oldFileExists and oldFile.mode != newFile.mode:
             intro = _("Mode change:")
-            details.append(f"{intro} {TrTables.enum(oldFile.mode)} &rarr; {TrTables.enum(newFile.mode)}.")
+            details.append(f"{intro} {trtables.enum(oldFile.mode)} &rarr; {trtables.enum(newFile.mode)}.")
 
         if delta.source == GitDeltaSource.Dirty and stderr:
             crlfWarningPattern = _workdirCrlfWarning
@@ -159,8 +159,8 @@ class SpecialDiffError:
     def typeChange(delta: GitDelta):
         oldText = _("Old type:")
         newText = _("New type:")
-        oldMode = TrTables.enum(delta.old.mode)
-        newMode = TrTables.enum(delta.new.mode)
+        oldMode = trtables.enum(delta.old.mode)
+        newMode = trtables.enum(delta.new.mode)
         table = ("<table>"
                  f"<tr><td><del><b>{oldText}</b></del> </td><td>{oldMode}</tr>"
                  f"<tr><td><add><b>{newText}</b></add> </td><td>{newMode}</td></tr>"
@@ -271,8 +271,8 @@ class SpecialDiffError:
         stillExists = Path(absPath).is_dir()
         isAbsorbed = stillExists and Path(absPath, ".git").is_file()
 
-        isDel = delta.status == "D"
-        isAdd = delta.status in "A?"
+        isDel = delta.status == GitStatus.Deleted
+        isAdd = delta.status.isAddedOrUntracked
         oldId = delta.old.id
         newId = delta.new.id
         headDidMove = oldId != newId

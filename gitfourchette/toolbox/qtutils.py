@@ -5,6 +5,7 @@
 # -----------------------------------------------------------------------------
 
 import itertools
+import math
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -47,12 +48,12 @@ def showInFolder(path: str):  # pragma: no cover (platform-specific)
                 else:
                     stringType = QMetaType.Type.QString.value
                 dbusArgs = QDBusArgument()
-                dbusArgs.beginArray(stringType)
+                dbusArgs.beginArray(stringType)  # type: ignore[call-overload]  # inaccurate stubs?
                 dbusArgs.add(path)
                 dbusArgs.endArray()
             else:
                 # Thankfully, PySide6 is more pythonic here.
-                dbusArgs = [path]
+                dbusArgs = [path]  # type: ignore[assignment]  # consider only PyQt6 for type checking
             iface.call("ShowItems", dbusArgs, "")
             iface.deleteLater()
             return
@@ -163,8 +164,26 @@ def enforceComboBoxMaxVisibleItems(comboBox: QComboBox, maxItems=0):
     # QStyleSheetStyle::styleHint() (qstylesheetstyle.cpp)
     comboBox.setStyleSheet(comboBox.styleSheet() + "\nQComboBox { combobox-popup: 0; }")
 
-    listView: QListView = comboBox.view()
+    listView = comboBox.view()
+    assert isinstance(listView, QListView)
     listView.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+
+def reevaluateStyleSheet(widget: QWidget):
+    qss = widget.styleSheet()
+    if not qss:
+        qss = "/* dummy */"
+    widget.setStyleSheet(qss)
+
+
+def toggleQssProperty(widget: QWidget, name: str, value: bool):
+    if value == bool(widget.property(name)):
+        return
+
+    widget.setProperty(name, "true" if value else None)
+
+    # Reset stylesheet to percolate property change
+    reevaluateStyleSheet(widget)
 
 
 def isDarkTheme(palette: QPalette | None = None):
@@ -172,7 +191,7 @@ def isDarkTheme(palette: QPalette | None = None):
         palette = QApplication.palette()
     themeBG = palette.color(QPalette.ColorRole.Base)  # standard theme background color
     themeFG = palette.color(QPalette.ColorRole.Text)  # standard theme foreground color
-    return themeBG.value() < themeFG.value()
+    return themeBG.lightness() < themeFG.lightness()
 
 
 def mutedTextColorHex(w: QWidget, alpha=.5) -> str:
@@ -233,8 +252,8 @@ class DisableWidgetUpdatesContext:
         self.widget.setUpdatesEnabled(True)
 
     @staticmethod
-    def methodDecorator(func):
-        def wrapper(*args, **kwargs):
+    def methodDecorator(func: Callable) -> Callable:
+        def wrapper(*args, **kwargs) -> Callable:
             widget: QWidget = args[0]
             with DisableWidgetUpdatesContext(widget):
                 return func(*args, **kwargs)
@@ -334,22 +353,16 @@ def makeInternalLink(urlAuthority: str, urlPath: str = "", urlFragment: str = ""
     return url.toString()
 
 
-def makeMultiShortcut(*args) -> MultiShortcut:
-    if len(args) == 1 and isinstance(args[0], list):
-        args = args[0]
-
-    shortcuts = []
+def makeMultiShortcut(*args: str | QKeySequence.StandardKey | Qt.Key | QKeySequence) -> MultiShortcut:
+    shortcuts: list[QKeySequence] = []
 
     for alt in args:
-        t = type(alt)
-        if t is str:
-            shortcuts.append(QKeySequence(alt))
-        elif t is QKeySequence.StandardKey:
+        if isinstance(alt, QKeySequence.StandardKey):
             shortcuts.extend(QKeySequence.keyBindings(alt))
-        elif t is Qt.Key:
+        elif isinstance(alt, (str, Qt.Key)):
             shortcuts.append(QKeySequence(alt))
         else:
-            assert t is QKeySequence
+            assert isinstance(alt, QKeySequence)
             shortcuts.append(alt)
 
     # Ensure no duplicates (stable order since Python 3.7+)
@@ -391,13 +404,24 @@ def mixColors(c1: QColor, c2: QColor, ratio=.5, rmin=0.0, rmax=1.0):
         lerp(c1.alphaF(), c2.alphaF(), ratio, rmin, rmax))
 
 
+def relativeLuminance(color: QColor) -> float:
+    """Relative luminance per WCAG 2.2"""
+    # https://www.w3.org/TR/WCAG21/relative-luminance.html
+    def srgbToLinear(x: float):
+        return x/12.92 if x <= .04045 else math.pow((x+.055)/ 1.055, 2.4)
+    r = .2126 * srgbToLinear(color.redF())
+    g = .7152 * srgbToLinear(color.greenF())
+    b = .0722 * srgbToLinear(color.blueF())
+    return r + g + b
+
+
 def findParentWidget(o: QObject) -> QWidget:
     p = o.parent()
     while p:
         if isinstance(p, QWidget):
             return p
         p = p.parent()
-    raise ValueError(f"No parent widget found for {repr(o)}")
+    raise ValueError(f"No parent widget found for {o!r}")
 
 
 def setTabOrder(*args: QWidget):
@@ -407,6 +431,17 @@ def setTabOrder(*args: QWidget):
     """
     for widget1, widget2 in itertools.pairwise(args):
         QWidget.setTabOrder(widget1, widget2)
+
+
+def packDialog(dialog: QDialog, widthHint=550, lockHeight=False):
+    dialog.layout().activate()
+    dialog.adjustSize()
+
+    if widthHint:
+        dialog.resize(max(widthHint, dialog.width()), dialog.height())
+
+    if lockHeight:
+        dialog.setFixedHeight(dialog.height())
 
 
 class DocumentLinks:

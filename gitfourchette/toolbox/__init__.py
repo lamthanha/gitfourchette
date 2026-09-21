@@ -49,6 +49,8 @@ from .qstatusbar2 import QStatusBar2
 from .qtabwidget2 import QTabWidget2, QTabBar2
 from .qtutils import (
     enforceComboBoxMaxVisibleItems,
+    reevaluateStyleSheet,
+    toggleQssProperty,
     isImageFormatSupported,
     onAppThread,
     setFontFeature,
@@ -72,9 +74,11 @@ from .qtutils import (
     CallbackAccumulator,
     lerp,
     mixColors,
+    relativeLuminance,
     DocumentLinks,
     findParentWidget,
     setTabOrder,
+    packDialog,
     QModelIndex_default,
     QPoint_zero,
 )

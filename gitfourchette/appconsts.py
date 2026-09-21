@@ -6,13 +6,14 @@
 
 import sys as _sys
 import os as _os
+from typing import TYPE_CHECKING  # noqa: F401
 
 
 def _envBool(key: str) -> bool:
     return _os.environ.get(key, "") not in ["", "0"]
 
 
-APP_VERSION = "1.9.1+fork"
+APP_VERSION = "1.11.0+fork"
 APP_SYSTEM_NAME = "gitfourchette"
 APP_DISPLAY_NAME = "Forkette"
 APP_URL_SCHEME = APP_SYSTEM_NAME

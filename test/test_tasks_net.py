@@ -35,7 +35,7 @@ from .util import *
 
 def testCloneRepoWithSubmodules(tempDir, mainWindow):
     wd = unpackRepo(tempDir, renameTo="unpacked-repo")
-    subWd, _dummy = reposcenario.submodule(wd, True)  # spice it up with a submodule
+    reposcenario.submodule(wd, True)  # spice it up with a submodule
     bare = makeBareCopy(wd, addAsRemote="", preFetch=False)
     target = str(Path(f"{tempDir.name}", "the-clone").resolve())
 
@@ -67,19 +67,19 @@ def testCloneRepoWithSubmodules(tempDir, mainWindow):
     cloneDialog.ui.pathEdit.setText(tempDir.name)
     QTest.qWait(0)
     assert not cloneDialog.cloneButton.isEnabled()
-    assert re.search(r"isn.t empty", QToolTip.text(), re.I)
+    assert re.search(r"isn.t empty", QToolTip.text(), re.IGNORECASE)
 
     # Disallow cloning to empty path
     cloneDialog.ui.pathEdit.setText("")
     QTest.qWait(0)
     assert not cloneDialog.cloneButton.isEnabled()
-    assert re.search(r"enter.+absolute path", QToolTip.text(), re.I)
+    assert re.search(r"enter.+absolute path", QToolTip.text(), re.IGNORECASE)
 
     # Disallow cloning to file path
     cloneDialog.ui.pathEdit.setText(f"{wd}/master.txt")
     QTest.qWait(0)
     assert not cloneDialog.cloneButton.isEnabled()
-    assert re.search(r"file at this path", QToolTip.text(), re.I)
+    assert re.search(r"file at this path", QToolTip.text(), re.IGNORECASE)
 
     # Set target path in clone dialog
     cloneDialog.ui.browseButton.click()
@@ -225,10 +225,10 @@ def testFetchRemote(tempDir, mainWindow, method):
     # Make some modifications to the bare repository that serves as a remote.
     # We're going to create a new branch and delete another.
     # The client must pick up on those modifications once it fetches the remote.
-    with RepoContext(barePath) as bareRepo:
-        assert bareRepo.is_bare
-        bareRepo.create_branch_on_head("new-remote-branch")
-        bareRepo.delete_local_branch("no-parent")
+    shell("""
+        git branch new-remote-branch
+        git branch -d no-parent
+    """, barePath)
 
     rw = mainWindow.openRepo(wd)
 
@@ -289,7 +289,7 @@ def testFetchRemoteBranch(tempDir, mainWindow):
         assert re.search(
             fr"localfs/master.+{str(oldHead)[:7]}.+{str(newHead)[:7]}",
             mainWindow.statusBar().currentMessage(),
-            re.I)
+            re.IGNORECASE)
 
     # The position of the remote's master branch should be up to date now
     assert rw.repo.branches.remote["localfs/master"].target == newHead
@@ -309,9 +309,7 @@ def testFetchRemoteBranchVanishes(tempDir, mainWindow, pull):
     # Modify the master branch in the bare repository that serves as a remote.
     # The client must pick up on this modification once it fetches the remote branch.
     barePath = makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
-    with RepoContext(barePath) as bareRepo:
-        assert bareRepo.is_bare
-        bareRepo.branches.local['master'].rename('switcheroo')
+    shell("git branch -m master switcheroo", barePath)
 
     rw = mainWindow.openRepo(wd)
 
@@ -397,8 +395,7 @@ def testFetchRemoteHistoryWithUnbornHead(tempDir, mainWindow):
 
 def testFetchRemoteBranchNoUpstream(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        repo.edit_upstream_branch("master", "")
+    shell("git branch --unset-upstream master", wd)
 
     rw = mainWindow.openRepo(wd)
     node = rw.sidebar.findNodeByRef("refs/heads/master")
@@ -410,14 +407,17 @@ def testFetchRemoteBranchUnbornHead(tempDir, mainWindow):
     wd = unpackRepo(tempDir, "TestEmptyRepository")
     upstreamWd = unpackRepo(tempDir)
 
-    with RepoContext(wd) as repo:
-        repo.remotes.set_url("origin", upstreamWd)
-        repo.remotes["origin"].fetch()
-        master = repo.branches.remote["origin/master"]
-        masterTip = master.target
+    shell(f"""
+        git remote set-url origin {shlex.quote(upstreamWd)}
+        git fetch origin
+
+        # Save tip of origin/master
+        git rev-parse origin/master > .git/TEST_masterTip
+
         # Move origin/master back to initial commit so we have something to fetch
-        master.set_target(Oid(hex="42e4e7c5e507e113ebbb7801b16b52cf867b7ce1"))
-        assert masterTip != master.target
+        echo 42e4e7c5e507e113ebbb7801b16b52cf867b7ce1 > .git/refs/remotes/origin/master
+    """, wd)
+    masterTip = Oid(hex=readTextFile(f"{wd}/.git/TEST_masterTip").strip())
 
     rw = mainWindow.openRepo(wd)
     assert masterTip != rw.repo.branches.remote["origin/master"].target
@@ -431,11 +431,10 @@ def testFetchRemoteBranchUnbornHead(tempDir, mainWindow):
 
 def testPullRemoteBranchNoUpstream(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        tip = repo.head_commit_id
-        repo.edit_upstream_branch("master", "")
+    shell("git branch --unset-upstream master", wd)
 
     rw = mainWindow.openRepo(wd)
+    tip = rw.repo.head_commit_id
     triggerMenuAction(mainWindow.menuBar(), "repo/pull")
     acceptQMessageBox(rw, "n.t tracking.+upstream")
     assert tip == rw.repo.head_commit_id
@@ -502,13 +501,17 @@ def testPullRemoteBranchCausesConflict(tempDir, mainWindow):
     wd = unpackRepo(tempDir, testRepoName="testrepoformerging")
     makeBareCopy(wd, "localfs", preFetch=True, deleteOtherRemotes=True)
 
-    with RepoContext(wd) as repo:
-        repo.edit_upstream_branch("master", "localfs/branch-conflicts")
+    shell("""
+        git branch master -u localfs/branch-conflicts
 
         # "Forget" top of graph
-        repo.delete_local_branch("branch-conflicts")
-        newTip = repo.branches.remote["localfs/branch-conflicts"].target
-        writeFile(f"{repo.path}/refs/remotes/localfs/branch-conflicts", str(repo[newTip].peel(Commit).parent_ids[0]))
+        git branch -d branch-conflicts
+        git rev-parse localfs/branch-conflicts > .git/newTip
+        git rev-parse localfs/branch-conflicts^1 > TEMP
+        mv TEMP .git/refs/remotes/localfs/branch-conflicts
+    """, wd)
+
+    newTip = readOidFile(f"{wd}/.git/newTip")
 
     rw = mainWindow.openRepo(wd)
     assert not rw.repo.any_conflicts
@@ -540,13 +543,14 @@ def testPush(tempDir, mainWindow, asNewBranch):
     makeBareCopy(wd, addAsRemote="localfs", preFetch=True, keepOldUpstream=True)
 
     # Make some update in our repo
-    with RepoContext(wd) as repo:
-        writeFile(f"{wd}/pushme.txt", "till I can get my satisfaction")
-        repo.index.add("pushme.txt")
-        repo.index.write()
-        newHead = repo.create_commit_on_head("push this commit to the remote")
+    shell("""
+        echo 'hello' > pushme.txt
+        git add pushme.txt
+        git commit -m 'push this commit to the remote'
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
+    newHead = rw.repo.head_commit_id
 
     # We still think the remote's master branch is on the old head for now
     assert rw.repo.branches.remote["localfs/master"].target == oldHead
@@ -564,7 +568,7 @@ def testPush(tempDir, mainWindow, asNewBranch):
     assert dlg.ui.trackCheckBox.isChecked()
     assert not dlg.willPushToNewBranch
     assert dlg.currentRemoteBranchFullName == "origin/master"
-    assert re.search(r"already tracks.+origin/master", dlg.ui.trackingLabel.text(), re.I)
+    assert re.search(r"already tracks.+origin/master", dlg.ui.trackingLabel.text(), re.IGNORECASE)
 
     if not asNewBranch:
         qcbSetIndex(dlg.ui.remoteBranchEdit, "localfs/master")
@@ -582,7 +586,7 @@ def testPush(tempDir, mainWindow, asNewBranch):
         assert dlg.willPushToNewBranch
 
         QTest.keyClicks(dlg.ui.newRemoteBranchNameEdit, "new")  # keyClicks ensures the correct signal is emitted
-        assert re.search(r"will track.+localfs/new.+instead of.+origin/master", dlg.ui.trackingLabel.text(), re.I)
+        assert re.search(r"will track.+localfs/new.+instead of.+origin/master", dlg.ui.trackingLabel.text(), re.IGNORECASE)
         assert dlg.currentRemoteBranchFullName == "localfs/new"
         assert dlg.willPushToNewBranch
 
@@ -600,8 +604,7 @@ def testShadowUpstream(tempDir, mainWindow):
     makeBareCopy(wd, addAsRemote="remote2", preFetch=True, keepOldUpstream=True)
 
     # Make local branch 'master' track no upstream
-    with RepoContext(wd) as repo:
-        repo.branches.local['master'].upstream = None
+    shell("git branch --unset-upstream master", wd)
 
     rw = mainWindow.openRepo(wd)
     pushDialog: PushDialog
@@ -650,8 +653,7 @@ def testShadowUpstream(tempDir, mainWindow):
 
 def testPushNoBranch(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        repo.checkout_commit(Oid(hex="49322bb17d3acc9146f98c97d078513228bbf3c0"))
+    shell("git checkout 49322bb", wd)
     rw = mainWindow.openRepo(wd)
     triggerMenuAction(mainWindow.menuBar(), "repo/push")
     acceptQMessageBox(rw, "switch to.+local branch")
@@ -659,8 +661,7 @@ def testPushNoBranch(tempDir, mainWindow):
 
 def testPushNoRemotes(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        repo.remotes.delete("origin")
+    shell("git remote remove origin", wd)
     rw = mainWindow.openRepo(wd)
 
     node = rw.sidebar.findNodeByRef("refs/heads/master")
@@ -688,7 +689,7 @@ def testPushMissingUpstream(tempDir, mainWindow):
     triggerMenuAction(menu, "push")
 
     pushDialog = findQDialog(rw, "Push", t=PushDialog)
-    assert re.match("new remote branch on .localfs.", pushDialog.ui.remoteBranchEdit.currentText(), re.I)
+    assert re.match("new remote branch on .localfs.", pushDialog.ui.remoteBranchEdit.currentText(), re.IGNORECASE)
     assert pushDialog.ui.newRemoteBranchNameEdit.isVisible()
     assert pushDialog.ui.newRemoteBranchNameEdit.text() == "missing-upstream"
 
@@ -706,8 +707,7 @@ def testPushTagOnCreate(tempDir, mainWindow):
         assert "etiquette" not in bareRepo.listall_tags()
 
     # Remove origin so that we don't attempt to push to the network
-    with RepoContext(wd) as repo:
-        repo.remotes.delete("origin")
+    shell("git remote remove origin", wd)
 
     rw = mainWindow.openRepo(wd)
 
@@ -728,8 +728,7 @@ def testPushExistingTag(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     barePath = makeBareCopy(wd, addAsRemote="localfs", preFetch=True, keepOldUpstream=True)
 
-    with RepoContext(wd) as repo:
-        repo.create_reference("refs/tags/etiquette", repo.head_commit_id)
+    shell("git tag etiquette HEAD", wd)
 
     with RepoContext(barePath) as bareRepo:
         assert "etiquette" not in bareRepo.listall_tags()
@@ -746,10 +745,11 @@ def testPushAllTags(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     barePath = makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
 
-    with RepoContext(wd) as repo, RepoContext(barePath) as bareRepo:
-        repo.create_reference("refs/tags/etiquette1", repo.head_commit_id)
-        repo.create_reference("refs/tags/etiquette2", repo.head_commit_id)
-        repo.create_reference("refs/tags/etiquette3", repo.head_commit_id)
+    shell("""
+        git tag etiquette1 HEAD
+        git tag etiquette2 HEAD
+        git tag etiquette3 HEAD
+    """, wd)
 
     with RepoContext(barePath) as bareRepo:
         assert "etiquette1" not in bareRepo.listall_tags()
@@ -768,8 +768,7 @@ def testPushAllTags(tempDir, mainWindow):
 
 def testPushDeleteTag(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        repo.create_reference("refs/tags/etiquette", repo.head_commit_id)
+    shell("git tag etiquette HEAD", wd)
 
     barePath = makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
     with RepoContext(barePath) as bareRepo:
@@ -796,8 +795,7 @@ def testPushReplacedTagFails(tempDir, mainWindow):
     makeBareCopy(wd, addAsRemote="localfs", preFetch=True, keepOldUpstream=True)
 
     # Remove origin so that we don't attempt to push to the network
-    with RepoContext(wd) as repo:
-        repo.remotes.delete("origin")
+    shell("git remote remove origin", wd)
 
     rw = mainWindow.openRepo(wd)
     assert rw.navLocator.commit != rw.repo.head_commit_id
@@ -828,10 +826,10 @@ def testForcePushWithLeasePass(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     makeBareCopy(wd, addAsRemote="remote2", preFetch=True, deleteOtherRemotes=True)
 
-    with RepoContext(wd) as repo:
-        newOid = repo.amend_commit_on_head("amended locally", TEST_SIGNATURE, TEST_SIGNATURE)
+    shell("git commit --amend -m'amended locally'", wd)
 
     rw = mainWindow.openRepo(wd)
+    newOid = rw.repo.head_commit_id
 
     triggerMenuAction(mainWindow.menuBar(), "repo/push")
     pushDialog: PushDialog = findQDialog(rw, "push.+branch")
@@ -855,10 +853,10 @@ def testForcePushWithLeaseRejected(tempDir, mainWindow):
             bareRepo.head_tree.id,
             [bareRepo.head_commit_id])
 
-    with RepoContext(wd) as repo:
-        newOid = repo.amend_commit_on_head("amended locally", TEST_SIGNATURE, TEST_SIGNATURE)
+    shell("git commit --amend -m'amended locally'", wd)
 
     rw = mainWindow.openRepo(wd)
+    newOid = rw.repo.head_commit_id
 
     triggerMenuAction(mainWindow.menuBar(), "repo/push")
     pushDialog: PushDialog = findQDialog(rw, "push.+branch")
@@ -867,7 +865,7 @@ def testForcePushWithLeaseRejected(tempDir, mainWindow):
 
     blurbLabel = pushDialog.ui.statusForm.ui.blurbLabel
     assert blurbLabel.isVisible()
-    assert re.search(r"force.push.+rejected to prevent data loss", blurbLabel.text(), re.I)
+    assert re.search(r"force.push.+rejected to prevent data loss", blurbLabel.text(), re.IGNORECASE)
     pushDialog.reject()
 
     assert rw.repo.branches.remote["remote2/master"].target != newOid
@@ -877,13 +875,12 @@ def testForcePushWithLeaseRejected(tempDir, mainWindow):
 def testAbortPushInProgress(tempDir, mainWindow, taskThread):
     wd = unpackRepo(tempDir)
     makeBareCopy(wd, addAsRemote="remote2", preFetch=True, deleteOtherRemotes=True)
-
-    with RepoContext(wd) as repo:
-        oldOid = repo.head_commit_id
-        newOid = repo.create_commit_on_head("hello", TEST_SIGNATURE, TEST_SIGNATURE)
+    shell("git commit --allow-empty -m'hello'", wd)
 
     mainWindow.openRepo(wd)
     rw = waitForRepoWidget(mainWindow)
+    oldOid = rw.repo.head_commit.parent_ids[0]
+    newOid = rw.repo.head_commit_id
 
     assert rw.repo.branches.local["master"].target == newOid
     assert rw.repo.branches.remote["remote2/master"].target == oldOid
@@ -915,7 +912,7 @@ def testAbortPushInProgress(tempDir, mainWindow, taskThread):
     cancelButton.click()
 
     assert rw.repo.branches.remote["remote2/master"].target == oldOid
-    GitDriver.runSync("fetch", "remote2", directory=wd, strict=True)
+    shell("git fetch remote2", wd)
     assert rw.repo.branches.remote["remote2/master"].target == oldOid
 
 
@@ -933,11 +930,9 @@ def testAbortPullInProgress(tempDir, mainWindow, taskThread):
             bareRepo.head_tree.id,
             [bareRepo.head_commit_id])
 
-    with RepoContext(wd) as repo:
-        oldHead = repo.head_commit_id
-
     mainWindow.openRepo(wd)
     rw = waitForRepoWidget(mainWindow)
+    oldHead = rw.repo.head_commit_id
 
     assert rw.repo.branches.remote["localfs/master"].target == oldHead
 
@@ -969,8 +964,7 @@ def testRemoteSkipFetchAll(tempDir, mainWindow):
                                 deleteOtherRemotes=i == 0)
 
         # Create a "hello" branch in the bare repo that we will fetch
-        with RepoContext(barePath) as bareRepo:
-            bareRepo.create_branch_on_head("hello")
+        shell("git branch hello", barePath)
 
     rw = mainWindow.openRepo(wd)
 
@@ -993,7 +987,7 @@ def testRemoteSkipFetchAll(tempDir, mainWindow):
 
     # Look for message in sidebar tooltip
     tip = rw.sidebar.nodeToFilterIndex(node).data(Qt.ItemDataRole.ToolTipRole)
-    assert re.search("skipped when fetching all remotes", tip, re.I)
+    assert re.search("skipped when fetching all remotes", tip, re.IGNORECASE)
 
     # Fetch
     triggerMenuAction(mainWindow.menuBar(), "repo/fetch remote branches")
@@ -1014,10 +1008,10 @@ def testAutoFetch(tempDir, mainWindow, enabled, taskThread):
     # Enable or disable auto-fetch.
     GFApplication.applyPrefs(autoFetch=enabled, autoFetchMinutes=1)
 
-    with RepoContext(barePath) as bareRepo:
-        assert bareRepo.is_bare
-        bareRepo.create_branch_on_head("new-remote-branch")
-        bareRepo.delete_local_branch("no-parent")
+    shell("""
+        git branch new-remote-branch
+        git branch -d no-parent
+    """, barePath)
 
     mainWindow.openRepo(wd)
     rw = waitForRepoWidget(mainWindow)
@@ -1053,8 +1047,7 @@ def testAutoFetch(tempDir, mainWindow, enabled, taskThread):
 
 def testAutoFetchFailure(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    GitDriver.runSync("remote", "set-url", "origin", "https://this-will-fail-to-resolve.invalid/whatever.git",
-                      directory=wd, strict=True)
+    shell("git remote set-url origin https://this-will-fail-to-resolve.invalid/whatever.git", wd)
 
     GFApplication.applyPrefs(autoFetch=True, autoFetchMinutes=1)
 
@@ -1065,7 +1058,7 @@ def testAutoFetchFailure(tempDir, mainWindow):
     rw.onAutoFetchTimerTimeout()
 
     # Make sure we're showing a discreet message in the status bar instead of a message box
-    assert re.search("couldn.t auto-fetch", mainWindow.statusBar2.currentMessage(), re.I)
+    assert re.search("couldn.t auto-fetch", mainWindow.statusBar2.currentMessage(), re.IGNORECASE)
 
 
 @pytest.mark.notParallelizableOnWindows
@@ -1078,8 +1071,7 @@ def testOngoingAutoFetchDoesntBlockOtherTasks(tempDir, mainWindow, taskThread):
 
     wd = unpackRepo(tempDir)
     barePath = makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
-    with RepoContext(barePath) as bareRepo:
-        bareRepo.create_branch_on_head("new-remote-branch")
+    shell("git branch new-remote-branch", barePath)
 
     # Open the repo and wait for it to settle
     mainWindow.openRepo(wd)
@@ -1114,8 +1106,7 @@ def testTaskTerminationTerminatesProcess(tempDir, mainWindow, taskThread):
     """Test that terminating a task also terminates its associated process."""
     wd = unpackRepo(tempDir)
     barePath = makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
-    with RepoContext(barePath) as bareRepo:
-        bareRepo.create_branch_on_head("new-remote-branch")
+    shell("git branch new-remote-branch", barePath)
     mainWindow.openRepo(wd)
     rw = waitForRepoWidget(mainWindow)
 

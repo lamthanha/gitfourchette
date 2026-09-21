@@ -24,7 +24,6 @@ from gitfourchette.forms.donateprompt import DonatePrompt
 from gitfourchette.forms.processdialog import ProcessDialog
 from gitfourchette.forms.reposettingsdialog import RepoSettingsDialog
 from gitfourchette.forms.repostub import RepoStub
-from gitfourchette.gitdriver import GitDriver
 from gitfourchette.graphview.commitlogmodel import SpecialRow, CommitLogModel
 from gitfourchette.mainwindow import MainWindow
 from gitfourchette.nav import NavLocator
@@ -515,7 +514,7 @@ def testSessionRestorePreservesSavedTabOrder(tempDir, mainWindow):
     """
     wdMain = unpackRepo(tempDir, renameTo="MainRepo")
     wdUnrelated = unpackRepo(tempDir, renameTo="UnrelatedRepo")
-    runShellScript("git worktree add ../LinkedWT no-parent", wdMain)
+    shell("git worktree add ../LinkedWT no-parent", wdMain)
     wdLinked = os.path.join(os.path.dirname(os.path.normpath(wdMain)), "LinkedWT")
 
     savedOrder = [wdMain, wdUnrelated, wdLinked]
@@ -659,8 +658,8 @@ def testDonatePrompt(mainWindow):
         # Don't schedule the prompt before hitting 10 launches
         assert 0 == settings.prefs.donatePrompt
 
-        with Session(begin=i != 0) as mainWindow:
-            assert not mainWindow.findChild(DonatePrompt)
+        with Session(begin=i != 0) as window:
+            assert not window.findChild(DonatePrompt)
 
     # Tenth launch should schedule donate prompt to appear in 60 days
     assert 59 <= daysToNextPrompt() <= 61
@@ -672,24 +671,24 @@ def testDonatePrompt(mainWindow):
     bogusSesh = settings.Session()
     bogusSesh.tabs = [qTempDir() + "/---this-path-should-not-exist---"]
     bogusSesh.write(True)
-    with Session() as mainWindow:
-        acceptQMessageBox(mainWindow, "session couldn.t be restored")
-        assert not mainWindow.findChild(DonatePrompt)
+    with Session() as window:
+        acceptQMessageBox(window, "session couldn.t be restored")
+        assert not window.findChild(DonatePrompt)
 
     # Intercept prompt and click "never show again"
-    with Session() as mainWindow:
-        donate: DonatePrompt = mainWindow.findChild(DonatePrompt)
+    with Session() as window:
+        donate: DonatePrompt = window.findChild(DonatePrompt)
         donate.ui.byeButton.click()
-    with Session() as mainWindow:
-        assert not mainWindow.findChild(DonatePrompt)
+    with Session() as window:
+        assert not window.findChild(DonatePrompt)
         assert settings.prefs.donatePrompt < 0  # permanently disabled
 
     # Force prompt to appear at the next launch again
     schedulePromptInThePast()
 
     # Intercept prompt and click "remind me in 3 months"
-    with Session() as mainWindow:
-        donate: DonatePrompt = mainWindow.findChild(DonatePrompt)
+    with Session() as window:
+        donate: DonatePrompt = window.findChild(DonatePrompt)
         donate.ui.postponeButton.click()
     assert 89 <= daysToNextPrompt() <= 91
 
@@ -697,17 +696,17 @@ def testDonatePrompt(mainWindow):
     schedulePromptInThePast()
 
     # Intercept prompt and click "donate"
-    with Session() as mainWindow, MockDesktopServicesContext() as services:
+    with Session() as window, MockDesktopServicesContext() as services:
         assert not services.urls
-        donate: DonatePrompt = mainWindow.findChild(DonatePrompt)
+        donate: DonatePrompt = window.findChild(DonatePrompt)
         donate.ui.donateButton.click()
         QTest.qWait(1500)
         assert len(services.urls) == 1
         assert services.urls[0].toString() == "https://ko-fi.com/jorio"
 
     # Prompt must not show up again
-    with Session(end=False) as mainWindow:
-        assert not mainWindow.findChild(DonatePrompt)
+    with Session(end=False) as window:
+        assert not window.findChild(DonatePrompt)
         assert settings.prefs.donatePrompt < 0  # permanently disabled
 
 
@@ -884,12 +883,10 @@ def testConfigFileScrubbing(tempDir, mainWindow):
 
 def testHideSelectedBranch(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        masterId = repo.branches.local['master'].target
-        detachedId = Oid(hex='ce112d052bcf42442aa8563f1e2b7a8aabbf4d17')
-        repo.checkout_commit(detachedId)
+    shell("git checkout ce112d0", wd)
 
     rw = mainWindow.openRepo(wd)
+    masterId = rw.repo.branches.local['master'].target
 
     # Select branch 'master'...
     rw.selectRef('refs/heads/master')
@@ -928,7 +925,7 @@ def testOpenWorktreeSubdirectoryOfBareRepo(tempDir, mainWindow):
     barePath = makeBareCopy(referenceWd, "", False)
 
     worktreePath = f"{barePath}/MyCoolWorktree"
-    GitDriver.runSync("worktree", "add", worktreePath,  directory=barePath, strict=True)
+    shell(f"git worktree add {worktreePath}", barePath)
     writeFile(f"{worktreePath}/hello.txt", "hello")
 
     rw = mainWindow.openRepo(worktreePath)
@@ -1122,3 +1119,28 @@ def testWindowSizeUnaffectedByLongRepoNames(tempDir, mainWindow):
 
     mainWindow.openRepo(wd)
     assert mainWindow.size() == desiredSize
+
+
+def testSshAgentSandboxingMatchesGit(tempDir, mainWindow):
+    app = GFApplication.instance()
+    app.applyPrefs(ownSshAgent=True)
+
+    if not FLATPAK:
+        assert not settings.prefs.isGitSandboxed()
+        assert not app.sshAgent.isSandboxed()
+        return
+
+    app.applyPrefs(gitPath="flatpak:/app/bin/git")
+    assert settings.prefs.isGitSandboxed()
+    assert app.sshAgent.isSandboxed()
+
+    # Resetting just ssh-agent should preserve correct sandboxed state
+    app.applyPrefs(ownSshAgent=False)
+    assert app.sshAgent is None
+    app.applyPrefs(ownSshAgent=True)
+    assert app.sshAgent.isSandboxed()
+
+    # Changing the git program setting should reset ssh-agent's sandboxed state
+    app.applyPrefs(gitPath="/usr/bin/git")
+    assert not settings.prefs.isGitSandboxed()
+    assert not app.sshAgent.isSandboxed()

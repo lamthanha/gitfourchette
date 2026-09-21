@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from gitfourchette import trtables
 from gitfourchette.exttools.toolcommands import ToolCommands
 from gitfourchette.exttools.toolpresets import ToolPresets
 from gitfourchette.exttools.usercommandsyntaxhighlighter import UserCommandSyntaxHighlighter
@@ -15,9 +16,9 @@ from gitfourchette.localization import *
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.settings import SHORT_DATE_PRESETS, prefs
-from gitfourchette.syntax import ColorScheme, PygmentsPresets, syntaxHighlightingAvailable
+from gitfourchette.syntax import ColorScheme, PygmentsPresets
+from gitfourchette.themes import ThemeName, ThemeColors, ThemeAccent
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
 from gitfourchette.worktrees import DEFAULT_WORKTREE_PATH_TEMPLATE
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ LANGUAGE_NAMES = {
 }
 
 
-def _boxWidget(layoutType, *controls):
+def _boxWidget(layoutType: type[QVBoxLayout | QHBoxLayout], *controls) -> QWidget:
     w = QWidget()
     layout: QBoxLayout = layoutType(w)
     layout.setSpacing(0)
@@ -61,12 +62,22 @@ def makeshiftSpacer(height=1):
     return spacer
 
 
-def localeCodeToLanguageName(code: str):
+def availableLocaleCodes() -> list[str]:
+    """
+    Returns gettext-compatible locale codes for which we have translation files.
+    Note: English NOT included!
+    """
+    return [f.removesuffix(".mo") for f in QDir("assets:lang", "*.mo").entryList()]
+
+
+def localeCodeToLanguageName(code: str) -> str:
     try:
         name = LANGUAGE_NAMES[code]
     except KeyError:
         # Cache native language name
         name = QLocale(code).nativeLanguageName()
+        name = name or f"???{code}???"  # Fallback if language code not recognized by Qt
+        name = name[0].upper() + name[1:]  # Many languages don't capitalize their name
         LANGUAGE_NAMES[code] = name
 
     return name
@@ -74,9 +85,6 @@ def localeCodeToLanguageName(code: str):
 
 class PrefsDialog(QDialog):
     lastCategory = 0
-
-    prefDiff: dict[str, Any]
-    "Delta to on-disk preferences."
 
     CategoryPrefix = "_category_"
     SpacerPrefix = "_spacer"
@@ -92,8 +100,10 @@ class PrefsDialog(QDialog):
         self.setObjectName("PrefsDialog")
         self.setWindowTitle(_("{app} Settings", app=qAppName()))
 
-        self.prefDiff = {}
-        self.categoryKeys = []
+        self.prefDiff: dict[str, Any] = {}
+        "Delta to on-disk preferences."
+
+        self.categoryKeys: list[str] = []
 
         self.categoryList = QListWidget()
         self.categoryList.setWordWrap(True)
@@ -145,7 +155,7 @@ class PrefsDialog(QDialog):
 
         self.setModal(True)
 
-    def _fillControls(self, focusOn):
+    def _fillControls(self, focusOn: str):
         skipKeys = self.getHiddenSettingKeys()
         form: QFormLayout | None = None
 
@@ -159,6 +169,8 @@ class PrefsDialog(QDialog):
                 form = self._newCategoryForm(category)
                 continue
 
+            assert form is not None
+
             # Spacer
             if key.startswith(self.SpacerPrefix):
                 form.addRow(makeshiftSpacer())
@@ -167,7 +179,7 @@ class PrefsDialog(QDialog):
             # Label
             if key.startswith(self.LabelPrefix):
                 labelKey = key.removeprefix(self.LabelPrefix)
-                labelText = TrTables.prefKey(labelKey)
+                labelText = trtables.prefKey(labelKey)
                 label = QLabel(labelText)
                 label.setEnabled(False)
                 tweakWidgetFont(label, bold=True)
@@ -181,8 +193,11 @@ class PrefsDialog(QDialog):
                 continue
 
             # Add the control to the form layout, with a leading caption if any
-            control, formRowItems = self._newRow(key)
-            form.addRow(*formRowItems)
+            control, label, field = self._newRow(key)
+            if label is not None:
+                form.addRow(label, field)
+            else:
+                form.addRow(field)
 
             # If the current key matches the setting we want to focus on,
             # bring this tab to the foreground
@@ -197,14 +212,14 @@ class PrefsDialog(QDialog):
         form = QFormLayout(formContainer)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
-        categoryName = TrTables.prefKey(category)
+        categoryName = trtables.prefKey(category)
         categoryIcon = stockIcon(f"prefs-{category.lower()}")
 
         self.categoryKeys.append(category)
         self.stackedWidget.addWidget(formContainer)
         self.categoryList.addItem(QListWidgetItem(categoryIcon, categoryName))
 
-        headerText = TrTables.prefKeyNoDefault(category + self.LocCategoryHeaderSuffix)
+        headerText = trtables.prefKeyNoDefault(category + self.LocCategoryHeaderSuffix)
         if headerText:
             headerText = headerText.format(app=qAppName())
             explainer = QLabel(headerText)
@@ -215,10 +230,16 @@ class PrefsDialog(QDialog):
 
         return form
 
-    def _newRow(self, key: str) -> tuple[QWidget, list]:
+    def _newRow(self, key: str) -> tuple[QWidget, QLabel | None, QWidget | QLayout]:
+        """
+        Build the widgets representing the given setting.
+        Return tuple: main control widget, label (if any), field to be inserted
+        into the QFormLayout.
+        """
+
         # Get caption and suffix
         suffix = ""
-        caption = TrTables.prefKey(key)
+        caption = trtables.prefKey(key)
         if "#" in caption:
             caption, suffix = caption.split("#")
             caption = caption.rstrip()
@@ -242,7 +263,7 @@ class PrefsDialog(QDialog):
             self.prependCheckBox(rowWidgets, "autoFetch", caption)
 
         # Any help text? Then make a help button for it & set tooltip text on the main control
-        tip = TrTables.prefKeyNoDefault(key + self.LocSettingHelpSuffix)
+        tip = trtables.prefKeyNoDefault(key + self.LocSettingHelpSuffix)
         if tip:
             tip = tip.format(app=qAppName())
             control.setToolTip(tip)
@@ -252,6 +273,7 @@ class PrefsDialog(QDialog):
 
         # Gather what to add to the form as a single item.
         # If we have more than a single widget to add to the form, lay them out in a row.
+        formField: QWidget | QLayout
         if len(rowWidgets) == 1:
             formField = control
         else:
@@ -265,7 +287,7 @@ class PrefsDialog(QDialog):
 
         # No caption, make field span entire row
         if not caption or isinstance(rowWidgets[0], QCheckBox):
-            return control, [formField]
+            return control, None, formField
 
         # There's a leading caption, so add it as the label in the row
         caption += _(":")
@@ -273,15 +295,15 @@ class PrefsDialog(QDialog):
         label.setBuddy(rowWidgets[0])
         if tip:
             label.setToolTip(tip)
-        return control, [label, formField]
+        return control, label, formField
 
     def setCategory(self, row: int):
         self.categoryList.setCurrentRow(row)
 
     def onCategoryChanged(self, row: int):
         categoryKey = self.categoryKeys[row]
-        categoryName = TrTables.prefKey(categoryKey)
-        categoryGuide = TrTables.prefKeyNoDefault(f"{categoryKey}_GUIDE")
+        categoryName = trtables.prefKey(categoryKey)
+        categoryGuide = trtables.prefKeyNoDefault(f"{categoryKey}_guide")
 
         self.stackedWidget.setCurrentIndex(row)
         self.categoryLabel.setText(categoryName)
@@ -415,8 +437,8 @@ class PrefsDialog(QDialog):
         elif valueType is int:
             return self.intControl(key, value)
         elif valueType is bool:
-            trueText = TrTables.prefKeyNoDefault(key + "_true")
-            falseText = TrTables.prefKeyNoDefault(key + "_false")
+            trueText = trtables.prefKeyNoDefault(key + "_true")
+            falseText = trtables.prefKeyNoDefault(key + "_false")
             if trueText or falseText:
                 return self.boolComboBoxControl(key, value, trueName=trueText, falseName=falseText)
             else:
@@ -437,8 +459,7 @@ class PrefsDialog(QDialog):
             localeRatios[code] = ratio
         localeRatios["en"] = "100"
 
-        langDir = QDir("assets:lang", "*.mo")
-        localeCodes = [f.removesuffix(".mo") for f in langDir.entryList()]
+        localeCodes = availableLocaleCodes()
         assert "en" not in localeCodes, "English shouldn't have an .mo file"
         localeCodes.append("en")
 
@@ -446,15 +467,11 @@ class PrefsDialog(QDialog):
         localeCodes.sort(key=lambda code: "0" if code == "en" else localeNames[code].casefold())
 
         for code in localeCodes:
-            name = localeNames[code]
-            name = name[0].upper() + name[1:]  # Many languages don't capitalize their name
-            name = f"{name} ({localeRatios.get(code, '--')}%)"
+            name = f"{localeNames[code]} ({localeRatios.get(code, '--')}%)"
             control.addItem(name, code)
 
         control.setCurrentIndex(control.findData(prefValue))
         control.activated.connect(lambda index: self.assign(prefKey, control.currentData(Qt.ItemDataRole.UserRole)))
-
-        control.setStyleSheet("QListView::item { max-height: 18px; }")  # Breeze-themed combobox gets unwieldy otherwise
         control.setMaxVisibleItems(20)
 
         return control
@@ -509,9 +526,8 @@ class PrefsDialog(QDialog):
         control.setMinimumWidth(round(fontMetrics.horizontalAdvance("x" * 72)))
         control.setTabStopDistance(fontMetrics.horizontalAdvance(" " * 4))
 
-        if syntaxHighlightingAvailable:
-            highlighter = UserCommandSyntaxHighlighter(control)
-            highlighter.setDocument(control.document())
+        highlighter = UserCommandSyntaxHighlighter(control)
+        highlighter.setDocument(control.document())
 
         control.setPlaceholderText(_(
             "# Enter custom terminal commands here.\n"
@@ -541,10 +557,6 @@ class PrefsDialog(QDialog):
         control.setAlignment(Qt.AlignmentFlag.AlignRight)
         control.setStepType(QSpinBox.StepType.AdaptiveDecimalStepType)
         control.valueChanged.connect(lambda v, k=prefKey: self.assign(k, v))
-
-        # Qt 6.8.2 inexplicably makes QSpinBoxes super tall with Breeze/Oxygen styles
-        control.setMaximumHeight(32)
-
         return control
 
     def boolComboBoxControl(self, prefKey: str, prefValue: bool, falseName: str, trueName: str) -> QComboBox:
@@ -561,7 +573,8 @@ class PrefsDialog(QDialog):
         control.checkStateChanged.connect(lambda state, k=prefKey: self.assign(k, state == Qt.CheckState.Checked))
         return control
 
-    def enumControl(self, prefKey, prefValue, enumType, previewCallback=None):
+    def enumControl(self, prefKey, prefValue, enumType, previewCallback=None) -> QComboBox | QComboBoxWithPreview:
+        control: QComboBox | QComboBoxWithPreview
         if previewCallback:
             control = QComboBoxWithPreview(self)
         else:
@@ -571,13 +584,13 @@ class PrefsDialog(QDialog):
             # PySide6 demotes StrEnum to str when stored with QComboBox.setItemData().
             # Wrap the value in a tuple to preserve the type. (PyQt5 & PyQt6 do the right thing here)
             data = (enumMember,)
-            name = TrTables.enum(enumMember)
+            name = trtables.enum(enumMember)
 
             if name == "":
                 continue
 
             if previewCallback:
-                control.addItemWithPreview(name, data, previewCallback(enumMember))
+                control.addItemWithPreview(name, data, previewCallback(enumMember))  # type: ignore[attr-defined] # mypy not smart enough here
             else:
                 control.addItem(name, data)
             if prefValue == enumMember:
@@ -591,23 +604,72 @@ class PrefsDialog(QDialog):
         return control
 
     def qtStyleControl(self, prefKey, prefValue):
-        defaultCaption = _p("system default theme setting", "System default")
+        currentStyleName = prefValue.split(",", 1)[0]
         control = QComboBox(self)
-        control.addItem(defaultCaption, userData="")
-        if not prefValue:
-            control.setCurrentIndex(0)
-        control.insertSeparator(1)
-        for availableStyle in QStyleFactory.keys():
-            control.addItem(availableStyle, userData=availableStyle)
-            if prefValue == availableStyle:
-                control.setCurrentIndex(control.count() - 1)
+        variantPicker = self._customThemeVariantPickerControl(prefValue)
 
-        def onPickStyle(index):
-            styleName = control.itemData(index, Qt.ItemDataRole.UserRole)
-            self.assign(prefKey, styleName)
+        separator = ("", "")
+        defaultStyle = (_p("system default theme setting", "System default"), "")
+        nativeStyles = [(name, name) for name in QStyleFactory.keys()]  # noqa: SIM118
+        customStyles = [(trtables.enum(theme), str(theme)) for theme in ThemeName]
+        nativeStyles.sort()
+        customStyles.sort()
+
+        entries = [defaultStyle, *customStyles, separator, *nativeStyles]
+        for caption, styleName in entries:
+            if not caption and not styleName:
+                control.insertSeparator(control.count())
+            else:
+                control.addItem(caption, userData=styleName)
+                if styleName == currentStyleName:
+                    control.setCurrentIndex(control.count() - 1)
+
+        def onPickStyle():
+            i = control.currentIndex()
+            newValue = control.itemData(i, Qt.ItemDataRole.UserRole)
+            if newValue in ThemeName:
+                variantPicker.setVisible(True)
+                accentIndex = variantPicker.currentIndex()
+                accentName = variantPicker.itemData(accentIndex)
+                newValue = accentName
+            else:
+                variantPicker.setVisible(False)
+            self.assign(prefKey, newValue)
 
         control.activated.connect(onPickStyle)
-        return control
+        variantPicker.activated.connect(onPickStyle)
+        variantPicker.setVisible(currentStyleName in ThemeName)
+
+        group = QWidget(self)
+        layout = QHBoxLayout(group)
+        layout.setContentsMargins(QMargins())
+        layout.addWidget(control)
+        layout.addWidget(variantPicker)
+        return group
+
+    def _customThemeVariantPickerControl(self, prefValue: str) -> QComboBox:
+        picker = QComboBox(self)
+        picker.setIconSize(QSize(16, 16))
+        enforceComboBoxMaxVisibleItems(picker, 32)
+
+        picker.addItem(stockIcon("light-dark-toggle"), _("System colors"), str(ThemeName.BuiltIn))
+
+        for dark in [False, True]:
+            picker.insertSeparator(picker.count())
+
+            themePrefix = ThemeName.BuiltIn + "," + ("dark" if dark else "light")
+            theme = ThemeColors.resolveTheme(themePrefix)
+
+            for accent in ThemeAccent:
+                icon = stockIcon("theme-chip", f"white={theme.bg} black={theme.text} blue={accent}")
+                caption = _("Dark {color}") if "dark" in themePrefix else _( "Light {color}")
+                caption = caption.format(color=trtables.enum(accent))
+                value = themePrefix + "," + accent
+                picker.addItem(icon, caption, value)
+                if value == prefValue:
+                    picker.setCurrentIndex(picker.count() - 1)
+
+        return picker
 
     def dateFormatControl(self, prefKey, prefValue, presets):
         currentDate = QDateTime.currentDateTime()
@@ -640,16 +702,10 @@ class PrefsDialog(QDialog):
 
     @benchmark
     def syntaxHighlightingControl(self, prefKey, prefValue):
-        if not syntaxHighlightingAvailable:  # pragma: no cover
-            sorry = QLabel(_("This feature requires {0}.", "Pygments"))
-            sorry.setEnabled(False)
-            return sorry
-
         autoCaption = _p("syntax highlighting", "Automatic ({name})", name=PygmentsPresets.Dark if isDarkTheme() else PygmentsPresets.Light)
         offCaption = _p("syntax highlighting", "Off")
 
         control = QComboBox(self)
-        control.setStyleSheet("QListView::item { max-height: 18px; }")  # Breeze-themed combobox gets unwieldy otherwise
         control.setIconSize(QSize(16, 16))  # Required if enforceComboBoxMaxVisibleItems kicks in
         control.addItem(stockIcon("light-dark-toggle"), autoCaption, userData=PygmentsPresets.Automatic)
         control.addItem(stockIcon("SP_BrowserStop"), offCaption, userData=PygmentsPresets.Off)

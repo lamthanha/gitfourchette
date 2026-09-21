@@ -13,7 +13,6 @@ import typing
 from types import NoneType, UnionType, GenericAlias
 from typing import Any
 
-from gitfourchette import pycompat  # noqa: F401 - StrEnum for Python 3.10
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 
@@ -137,7 +136,7 @@ class PrefsFile:
                 return False
 
         if not isinstance(jsonObject, dict):
-            logger.warning(f"{prefsPath}: not a JSON dict")
+            logger.warning(f"{prefsPath}: not a JSON dict")  # type: ignore[unreachable]
             return False
 
         # Pop file version before decoding user fields
@@ -158,7 +157,7 @@ class PrefsFile:
                 continue
 
             try:
-                value = self.decode(value, fields[key].type)
+                value = self.decode(value, fields[key].type)  # type: ignore
             except ValueError as error:
                 logger.warning(f"{prefsPath}: {key}: {error}")
                 continue
@@ -191,10 +190,12 @@ class PrefsFile:
             union = typing.get_args(dstType)
             assert len(union) == 2
             dstType = next(t for t in union if t is not NoneType)
+        assert type(dstType) is not UnionType
 
         # Extract generic class from GenericAlias, e.g. list[str] --> list
         if type(dstType) is GenericAlias:
             dstType = typing.get_origin(dstType)
+        assert not isinstance(dstType, GenericAlias)
 
         srcType: type
         if dstType is bytes:

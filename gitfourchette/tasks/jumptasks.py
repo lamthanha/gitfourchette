@@ -14,12 +14,12 @@ import dataclasses
 import logging
 import os
 import re
-from collections.abc import Generator
 
+from gitfourchette import trtables
 from gitfourchette import settings
 from gitfourchette.diffview.diffdocument import DiffDocument
 from gitfourchette.diffview.specialdiff import SpecialDiffError, ImageDelta
-from gitfourchette.gitdriver import GitConflict, GitDelta, GitDriver, argsIf
+from gitfourchette.gitdriver import GitConflict, GitDelta, GitStatus, GitDriver, argsIf
 from gitfourchette.gitdriver.parsers import parseAheadBehind
 from gitfourchette.graphview.commitlogmodel import SpecialRow
 from gitfourchette.localization import *
@@ -29,14 +29,13 @@ from gitfourchette.qt import *
 from gitfourchette.repomodel import UC_FAKEREF, UC_FAKEID
 from gitfourchette.tasks import TaskPrereqs
 from gitfourchette.tasks.loadtasks import LoadPatch, TAbstractDiffDocument
-from gitfourchette.tasks.repotask import AbortTask, RepoTask, TaskEffects, RepoGoneError, FlowControlToken
+from gitfourchette.tasks.repotask import AbortTask, RepoTask, TaskEffects, RepoGoneError
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
 from gitfourchette.worktrees import parseWorktreeListPorcelain
 
 logger = logging.getLogger(__name__)
 
-_submoduleIndexLinePattern = re.compile(r"^index ([\da-f]+)\.\.([\da-f]+)", re.M)
+_submoduleIndexLinePattern = re.compile(r"^index ([\da-f]+)\.\.([\da-f]+)", re.MULTILINE)
 
 
 def loadWorkdir(task: RepoTask, allowWriteIndex: bool):
@@ -96,7 +95,7 @@ def loadWorkdir(task: RepoTask, allowWriteIndex: bool):
         if not submoduleUpdated:
             continue
 
-        if delta.status == "D":
+        if delta.status == GitStatus.Deleted:
             assert delta.new.isId0()
             continue
 
@@ -156,7 +155,12 @@ class Jump(RepoTask):
         delta: GitDelta | None = None
 
     def canKill(self, task: RepoTask):
-        return isinstance(task, Jump | RefreshRepo)
+        return isinstance(task, Jump
+                          | JumpBack
+                          | JumpForward
+                          | JumpToHEAD
+                          | JumpToUncommittedChanges
+                          | RefreshRepo)
 
     def flow(self, locator: NavLocator):
         if not locator:
@@ -174,7 +178,7 @@ class Jump(RepoTask):
         if locator.hasFlags(NavFlags.ActivateWindow):  # initial locator!
             self.rw.activateWindow()
 
-    def loadResult(self, locator: NavLocator) -> Generator[FlowControlToken, None, Result]:
+    def loadResult(self, locator: NavLocator) -> RepoTask.Flow[Result]:
         rw = self.rw
 
         # If the locator is "coarse" (i.e. no specific path given, just a generic context),
@@ -221,8 +225,8 @@ class Jump(RepoTask):
             return Jump.Result(rw.diffView.currentLocator, rw.diffView.currentDiffDocument, delta)
 
         # Load the patch
-        patchTask = yield from self.flowSubtask(LoadPatch, delta, locator)
-        return Jump.Result(locator, patchTask.diffDocument, delta)
+        diffDocument = yield from self.flowSubtask(LoadPatch, delta, locator)
+        return Jump.Result(locator, diffDocument, delta)
 
     def isDiffViewAlreadySetUpFor(self, locator: NavLocator, delta: GitDelta) -> bool:
         currentLocator = self.rw.diffView.currentLocator
@@ -262,7 +266,7 @@ class Jump(RepoTask):
 
         return delta == currentDelta
 
-    def showWorkdir(self, locator: NavLocator) -> Generator[FlowControlToken, None, NavLocator]:
+    def showWorkdir(self, locator: NavLocator) -> RepoTask.Flow[NavLocator]:
         rw = self.rw
         repoModel = self.repoModel
 
@@ -295,12 +299,18 @@ class Jump(RepoTask):
                 rw.dirtyFiles.setContents(repoModel.workdirUnstagedDeltas)
                 rw.stagedFiles.setContents(repoModel.workdirStagedDeltas)
 
+            # Invalidate ConflictView if its current conflict is gone
+            cc = rw.conflictView.currentConflict
+            if not any(cc == d.conflict for d in repoModel.workdirUnstagedDeltas):
+                rw.conflictView.invalidate()
+
             nStaged = rw.stagedFiles.model().rowCount()
             # Fork: header text is now DiffArea's job (also drives the live filter path).
             rw.diffArea.refreshFileHeaders()
             # Fork: commit button keeps a static label ("Commit" / "Commit and Push" under
             # Shift, see DiffArea._refreshShiftableButtons) instead of upstream's file count.
 
+            # Make Commit button bold if anything is staged
             commitButtonFont = rw.diffArea.commitButton.font()
             commitButtonBold = nStaged != 0
             if commitButtonFont.bold() != commitButtonBold:
@@ -419,7 +429,7 @@ class Jump(RepoTask):
             _n("{n} file is hidden by the file list filter.",
                "{n} files are hidden by the file list filter.", numHidden))
 
-    def showCommit(self, locator: NavLocator) -> Generator[FlowControlToken, None, NavLocator]:
+    def showCommit(self, locator: NavLocator) -> RepoTask.Flow[NavLocator]:
         """
         Jump to a commit.
         Return a refined NavLocator.
@@ -473,7 +483,6 @@ class Jump(RepoTask):
                 and locator.selectedCommits == rw.navLocator.selectedCommits):
             # No need to reload the same commit diff
             logger.debug("Don't reload same commit diff")
-            pass
 
         else:
             # Loading a different commit
@@ -510,10 +519,15 @@ class Jump(RepoTask):
         # reflects the filtered view).
         numChanges = flv.flModel.totalRowCount
         if numChanges == 0:
+            if locator.commitDiffAB():
+                a, b = locator.commitDiffAB()
+                message = _("No changes from {0} to {1}.", hquo(shortHash(a)), hquo(shortHash(b)))
+                details = _("The trees are identical at both commits.")
+            else:
+                message = _("This commit is empty.")
+                details = _("Commit {0} doesn’t affect any files.", hquo(shortHash(locator.commit)))
+            sde = SpecialDiffError(message, details)
             locator = locator.replace(path="")
-            sde = SpecialDiffError(
-                _("This commit is empty."),
-                _("Commit {0} doesn’t affect any files.", hquo(shortHash(locator.commit))))
             raise Jump.Result(locator, sde)
 
         # Fork: early out if the filter hides every file of a non-empty commit
@@ -607,7 +621,7 @@ class Jump(RepoTask):
         details = []
 
         if locator.context.isWorkdir():
-            contextName = TrTables.enum(locator.context).lower()
+            contextName = trtables.enum(locator.context).lower()
             details.append(contextName)
         elif locator.context == NavContext.COMMITTED:
             diffAB = locator.commitDiffAB()
@@ -638,16 +652,15 @@ class Jump(RepoTask):
             parts.append(f" <span style='color: gray;'>({suffix})</span>")
         return "".join(parts)
 
+    @classmethod
+    def _jumpDelta(cls, task: RepoTask, delta: int):
+        """
+        Navigate back or forward in the RepoWidget's NavHistory.
+        """
 
-class JumpBackOrForward(RepoTask):
-    """
-    Navigate back or forward in the RepoWidget's NavHistory.
-    """
-
-    def flow(self, delta: int):
         assert delta in [-1, 1], "illegal delta value"
 
-        rw = self.rw
+        rw = task.rw
 
         # Get starting point
         rw.saveFilePositions()
@@ -668,7 +681,7 @@ class JumpBackOrForward(RepoTask):
                 continue
 
             # Do the jump. This may be a no-op if the locator is stale.
-            yield from self.flowSubtask(Jump, locator)
+            yield from task.flowSubtask(cls, locator)
 
             # The jump was successful if the RepoWidget's locator
             # comes out similar enough to the one from the history.
@@ -684,27 +697,29 @@ class JumpBackOrForward(RepoTask):
         rw.historyChanged.emit()
 
 
-class JumpBack(JumpBackOrForward):
+class JumpBack(RepoTask):
     def flow(self):
-        yield from JumpBackOrForward.flow(self, -1)
+        yield from Jump._jumpDelta(self, -1)
 
 
-class JumpForward(JumpBackOrForward):
+class JumpForward(RepoTask):
     def flow(self):
-        yield from JumpBackOrForward.flow(self, 1)
+        yield from Jump._jumpDelta(self, 1)
 
 
-class JumpToUncommittedChanges(Jump):
+class JumpToUncommittedChanges(RepoTask):
     def flow(self):
-        yield from Jump.flow(self, NavLocator.inWorkdir())
+        locator = NavLocator.inWorkdir()
+        yield from self.flowSubtask(Jump, locator)
 
 
-class JumpToHEAD(Jump):
+class JumpToHEAD(RepoTask):
     def prereqs(self) -> TaskPrereqs:
         return TaskPrereqs.NoUnborn
 
     def flow(self):
-        yield from Jump.flow(self, NavLocator.inRef("HEAD"))
+        locator = NavLocator.inRef("HEAD")
+        yield from self.flowSubtask(Jump, locator)
 
 
 class RefreshRepo(RepoTask):

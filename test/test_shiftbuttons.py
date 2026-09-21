@@ -36,7 +36,7 @@ def testCommitAndPushQuietToUpstream(tempDir, mainWindow):
 def testCommitAndPushNoUpstreamFallsBackToPushDialog(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     makeBareCopy(wd, addAsRemote="localfs", preFetch=True)
-    runShellScript("git switch -c standalone", wd)  # branch with no upstream
+    shell("git switch -c standalone", wd)  # branch with no upstream
     writeFile(f"{wd}/pushme.txt", "no upstream here")
     rw = mainWindow.openRepo(wd)
     _stageFirstDirtyFile(rw)

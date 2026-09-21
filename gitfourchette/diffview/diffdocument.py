@@ -9,7 +9,7 @@ from __future__ import annotations
 import difflib
 import re
 from bisect import bisect_left
-from collections.abc import Generator
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from gitfourchette import colors
@@ -39,7 +39,15 @@ def _parseHunkHeader(text: str) -> tuple[int, int, int, int, str]:
 @dataclass
 class DiffLinePos:
     hunkID: int
+
     hunkLineNum: int
+    """
+    0-indexed line number within the hunk.
+    -1 means the hunk header line itself ("@@ ... @@").
+    """
+
+    def isHunkHeaderLine(self) -> bool:
+        return self.hunkLineNum == -1
 
 
 @dataclass
@@ -91,6 +99,22 @@ class LineData:
     def parseHunkHeader(self) -> tuple[int, int, int, int, str]:
         assert self.hunkPos.hunkLineNum == -1
         return _parseHunkHeader(self.text)
+
+    @property
+    def originDelta(self) -> int:
+        if self.origin == "+":
+            return 1
+        if self.origin == "-":
+            return -1
+        return 0
+
+    @property
+    def reverseOrigin(self) -> str:
+        if self.origin == "+":
+            return "-"
+        if self.origin == "-":
+            return "+"
+        return self.origin
 
 
 class DiffTextFormats:
@@ -209,7 +233,7 @@ class DiffDocument:
             # Start new hunk
             if firstChar == "@":
                 rawLine = patch[pos:endPos]
-                oldLine, _dummy, newLine, _dummy, _dummy = _parseHunkHeader(rawLine)
+                oldLine, _dummy1, newLine, _dummy2, _dummy3 = _parseHunkHeader(rawLine)
 
                 hunkID += 1
                 hunkLineNum = -1
@@ -270,7 +294,7 @@ class DiffDocument:
                 perfectClumpTally -= 1
                 minuses += 1
             else:
-                assert origin == " ", f"unknown origin: '{origin.encode('unicode_escape')}'"
+                assert origin == " ", f"unknown origin: {origin.encode('unicode_escape')!r}"
                 assert ld.newLineNo == newLine
                 assert ld.oldLineNo == oldLine
                 newLine += 1
@@ -416,7 +440,7 @@ class DiffDocument:
         assert not doppelgangerBlocksQueue, "should've consumed all doppelganger matching blocks!"
 
 
-def _invertMatchingBlocks(blockList: list[difflib.Match], useA: bool) -> Generator[tuple[int, int], None, None]:
+def _invertMatchingBlocks(blockList: list[difflib.Match], useA: bool) -> Iterator[tuple[int, int]]:
     px = 0
 
     for block in blockList:

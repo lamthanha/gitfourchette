@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from gitfourchette import settings
 from gitfourchette.application import GFApplication
+from gitfourchette.codeview.codegutter import CodeGutter
 from gitfourchette.codeview.codehighlighter import CodeHighlighter
 from gitfourchette.codeview.coderubberband import CodeRubberBand
 from gitfourchette.codeview.codesearch import CodeSearch
@@ -22,9 +22,6 @@ from gitfourchette.nav import NavLocator
 from gitfourchette.qt import *
 from gitfourchette.syntax import ColorScheme
 from gitfourchette.toolbox import *
-
-if TYPE_CHECKING:
-    from gitfourchette.codeview.codegutter import CodeGutter
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +39,12 @@ class CodeView(QPlainTextEdit):
 
     FormattingMarkFlags = QTextOption.Flag.ShowTabsAndSpaces
 
-    def __init__(self, gutterClass, highlighterClass=CodeHighlighter, parent=None):
+    def __init__(
+            self,
+            gutterClass: type[CodeGutter] = CodeGutter,
+            highlighterClass: type[CodeHighlighter] = CodeHighlighter,
+            parent=None
+    ):
         super().__init__(parent)
 
         self.setReadOnly(True)
@@ -343,12 +345,15 @@ class CodeView(QPlainTextEdit):
     # Context menu
 
     def contextMenuActions(self, clickedCursor: QTextCursor) -> list[ActionDef]:
-        raise NotImplementedError("subclasses of CodeView must override this!")
+        if type(self) is not CodeView:  # pragma: no cover
+            raise NotImplementedError("CodeView subclasses must override this function")
+
+        return []
 
     def onContextMenuRequested(self, point: QPoint):
         # Don't show the context menu if we're empty
         if self.document().isEmpty():
-            return None
+            return
 
         # Get standard context menu (copy, select all, etc.)
         bottomMenu: QMenu = self.createStandardContextMenu()
@@ -357,10 +362,11 @@ class CodeView(QPlainTextEdit):
         clickedCursor = self.cursorForPosition(point)
 
         # Get actions from concrete class
-        actions = self.contextMenuActions(clickedCursor)
+        specializedActions = self.contextMenuActions(clickedCursor)
 
         # Append common CodeView actions
-        actions += [
+        actions: list[ActionDef | QAction] = [
+            *specializedActions,
             ActionDef.SEPARATOR,
             *[a for a in bottomMenu.actions() if not a.isSeparator()],
             ActionDef.SEPARATOR,
@@ -411,7 +417,7 @@ class CodeView(QPlainTextEdit):
     # ---------------------------------------------
     # Cursor/selection
 
-    def getSelectedLineExtents(self):
+    def getSelectedLineExtents(self) -> tuple[int, int]:
         """ Return block numbers of the first and last blocks encompassing the current selection """
 
         cursor: QTextCursor = self.textCursor()
@@ -427,11 +433,11 @@ class CodeView(QPlainTextEdit):
 
         return startBlock, endBlock
 
-    def getMaxPosition(self):
+    def getMaxPosition(self) -> int:
         lastBlock = self.document().lastBlock()
         return lastBlock.position() + max(0, lastBlock.length() - 1)
 
-    def getAnchorHomeLinePosition(self):
+    def getAnchorHomeLinePosition(self) -> int:
         cursor: QTextCursor = self.textCursor()
 
         # Snap anchor to start of home line
@@ -440,7 +446,7 @@ class CodeView(QPlainTextEdit):
 
         return cursor.anchor()
 
-    def getStartOfLineAt(self, point: QPoint):
+    def getStartOfLineAt(self, point: QPoint) -> int:
         clickedCursor: QTextCursor = self.cursorForPosition(point)
         clickedCursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
         return clickedCursor.position()
@@ -491,3 +497,11 @@ class CodeView(QPlainTextEdit):
             raise KeyError("no detached code view")
         assert detachedCodeView.isDetachedWindow
         return detachedCodeView
+
+    def idealDetachedSize(self) -> QSize:
+        windowHeight = int(QApplication.primaryScreen().availableSize().height() * .8)
+        windowWidth = (self.gutter.calcWidth()
+                       + self.fontMetrics().horizontalAdvance("M" * 81)
+                       + self.verticalScrollBar().width())
+        return QSize(windowWidth, windowHeight)
+

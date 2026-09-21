@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from gitfourchette import settings
 from gitfourchette.blameview.blamemodel import BlameModel, RevList, Revision
-from gitfourchette.gitdriver import argsIf, GitDriver
+from gitfourchette.diffview.diffdocument import LineData
+from gitfourchette.gitdriver import argsIf, GitDriver, GitStatus, GitDeltaSource, GitDelta
 from gitfourchette.gitdriver.parsers import parseGitBlame
 from gitfourchette.localization import *
 from gitfourchette.porcelain import *
@@ -19,15 +20,19 @@ from gitfourchette.tasks import RepoTask, TaskPrereqs
 from gitfourchette.tasks.repotask import AbortTask
 from gitfourchette.toolbox import *
 
+if TYPE_CHECKING:
+    from gitfourchette.blameview.blamewindow import BlameWindow
+
 
 class OpenBlame(RepoTask):
     def prereqs(self) -> TaskPrereqs:
         return TaskPrereqs.NoUnborn
 
-    def flow(self, path: str, seed: Oid = NULL_OID):
+    def flow(self, path: str, seed: Oid = NULL_OID, showAsync: bool = True) -> RepoTask.Flow[BlameWindow]:
         from gitfourchette.blameview.blamewindow import BlameWindow
 
-        revList = yield from self._buildRevList(path)
+        upperBound = yield from self._findUpperBound(path, seed)
+        revList = yield from self._buildRevList(path, upperBound)
 
         blameModel = BlameModel(self.repoModel, revList)
 
@@ -39,27 +44,62 @@ class OpenBlame(RepoTask):
         # Die in tandem with RepoWidget
         self.rw.destroyed.connect(blameWindow.close)
 
-        windowHeight = int(QApplication.primaryScreen().availableSize().height() * .8)
-        windowWidth = (blameWindow.textEdit.gutter.calcWidth()
-                       + blameWindow.textEdit.fontMetrics().horizontalAdvance("M" * 81)
-                       + blameWindow.textEdit.verticalScrollBar().width())
-        blameWindow.resize(windowWidth, windowHeight)
-        blameWindow.show()
-        blameWindow.activateWindow()  # bring to foreground after ProcessDialog
-
         self.epilog.status = _n("{n} revision found.", "{n} revisions found.", n=len(revList))
 
-        try:
-            start = revList.revisionForCommit(seed)
-        except KeyError:
-            start = blameModel.currentRevision
-        blameWindow.showRevision(start)
+        if showAsync:
+            blameWindow.show()
+            blameWindow.activateWindow()  # bring to foreground after ProcessDialog
 
-    def _buildRevList(self, path: str):
+            try:
+                start = revList.revisionForCommit(seed)
+            except KeyError:
+                start = blameModel.currentRevision
+
+            # Queue up another RepoTask to show the revision asynchronously
+            blameWindow.showRevision(start)
+
+        return blameWindow
+
+    def _findUpperBound(self, path: str, seed: Oid) -> RepoTask.Flow[Oid]:
+        if seed == NULL_OID:
+            return seed
+
+        # Favor current branch if it contains this commit
+        if path not in self.repo.head_tree:
+            useHead = False
+        else:
+            driver = yield from self.flowCallGit(
+                "merge-base",
+                "--is-ancestor",
+                str(seed),
+                "HEAD",
+                autoFail=False)
+            if driver.exitCode() not in [0, 1]:
+                raise AbortTask(driver.htmlErrorText(), details=driver.formatCommandLine())
+            useHead = driver.exitCode() == 0
+
+        if useHead:
+            newSeed = self.repo.head_commit_id
+        else:
+            # Fall back to most recent branch that contains this commit
+            driver = yield from self.flowCallGit(
+                "for-each-ref",
+                "--count=1",
+                f"--contains={seed}",
+                "--format=%(objectname)")
+            hashStr = driver.stdoutScrollback().strip()
+            newSeed = Oid(hex=hashStr)
+
+        if seed != newSeed:
+            tree = self.repo[newSeed].peel(Tree)
+            if path in tree:
+                seed = newSeed
+
+        return seed
+
+    def _buildRevList(self, path: str, upperBound: Oid) -> RepoTask.Flow[RevList]:
         seedPath = path
-
         revList = RevList()
-        upperBound = NULL_OID
 
         while path:
             revision, path = yield from self._expandRevList(revList, path, upperBound)
@@ -67,7 +107,7 @@ class OpenBlame(RepoTask):
                 upperBound = revision.commitId
 
         if len(revList) == 0:
-            raise AbortTask(_("File {0} has no history in the repository.", hquoe(seedPath)))
+            raise AbortTask(_("File {0} has no history in the repository.", bquo(seedPath)))
 
         wdDelta = self.repoModel.findWorkdirDelta(seedPath)
         if wdDelta is not None:
@@ -77,7 +117,12 @@ class OpenBlame(RepoTask):
 
         return revList
 
-    def _expandRevList(self, revList: RevList, path: str, upperBound: Oid):
+    def _expandRevList(
+            self,
+            revList: RevList,
+            path: str,
+            upperBound: Oid
+    ) -> RepoTask.Flow[tuple[Revision | None, str]]:
         # Notes about some of the arguments:
         # --parents
         #       Enable parent rewriting so we can build a simplified graph
@@ -117,7 +162,8 @@ class OpenBlame(RepoTask):
                 assert not revision.parentIds, "existing revision already has parents!!!"
                 revision.parentIds = parentIds
             except KeyError:
-                revision = Revision(path, commitId, parentIds, status="M" if parentIds else "A")
+                status = GitStatus.Modified if parentIds else GitStatus.Added
+                revision = Revision(path, commitId, parentIds, status=status)
                 revList.push(revision)
 
                 # Tip commit (not referred to by another commit in the trace):
@@ -130,7 +176,7 @@ class OpenBlame(RepoTask):
         # Last revision has no parents - See if it's a rename
         if revision is not None and not revision.parentIds:
             delta = yield from self._refineWithDelta(revision)
-            if delta.status in "RC":
+            if delta.status in [GitStatus.Renamed, GitStatus.Copied]:
                 bottomPath = delta.old.path
 
         # TODO: If the top commit is 'R' we could expand its history upwards!
@@ -151,6 +197,81 @@ class OpenBlame(RepoTask):
         return delta
 
 
+class OpenBlameToLine(RepoTask):
+    def prereqs(self) -> TaskPrereqs:
+        return TaskPrereqs.NoUnborn
+
+    def flow(self, delta: GitDelta, lineData: LineData):
+        if lineData.origin == "-":
+            file = delta.old
+            line = lineData.oldLineNo
+        else:
+            file = delta.new
+            line = lineData.newLineNo
+
+        # ----------------------------------------------------------------------
+        # Find out on which commit to seed the blame
+
+        if file.source == GitDeltaSource.Commit:
+            seed = file.sourceCommit
+        elif file.source == GitDeltaSource.Index and delta.source == GitDeltaSource.Dirty:
+            seed = self.repo.head_commit_id
+        else:
+            seed = NULL_OID
+
+        # ----------------------------------------------------------------------
+        # Find out which commit introduced this line
+
+        driver = yield from self.flowCallGit(
+            "blame",
+            "--porcelain",
+            f"-L{line},{line}",
+            *argsIf(seed != NULL_OID, str(seed)),
+            "--",
+            file.path)
+
+        introducerHash, introducerLine, _dummy = next(parseGitBlame(driver.stdoutScrollback()))
+        introducerCommit = Oid(hex=introducerHash)
+        # Note: Git can return 0000000 if the change originated in the workdir.
+        # We happen to interpret that as UC_FAKEID.
+
+        # ----------------------------------------------------------------------
+        # Perform full blame (from seed)
+
+        blameWindow: BlameWindow = yield from self.flowSubtask(OpenBlame, path=file.path, seed=seed, showAsync=False)
+
+        # ----------------------------------------------------------------------
+        # Zero in on the commit that introduced the line
+
+        try:
+            introducerRev = blameWindow.model.revList.revisionForCommit(introducerCommit)
+        except KeyError as ex:
+            raise AbortTask(f"{introducerCommit} missing from revlist") from ex
+        else:
+            yield from self.flowSubtask(BlameRevision, introducerRev, False, blameWindow)
+        finally:
+            blameWindow.show()
+            blameWindow.activateWindow()  # bring to foreground after ProcessDialog
+
+        # ----------------------------------------------------------------------
+        # Select the line
+
+        block = blameWindow.textEdit.document().findBlockByNumber(introducerLine - 1)
+        assert block.isValid()
+        cursor = QTextCursor(block)  # cursor positioned at block start
+        cursor.setPosition(block.position() + block.length() - 1, QTextCursor.MoveMode.KeepAnchor)
+        blameWindow.textEdit.setTextCursor(cursor)
+        blameWindow.textEdit.centerCursor()
+
+        # Check selection accuracy
+        if file.source.isWorkdir() and cursor.selectedText().rstrip() != lineData.text.rstrip():
+            sorry = paragraphs(
+                _("Couldn’t blame the exact line you selected, because "
+                  "the file contains both staged and unstaged changes."),
+                _("Try staging the entire file for more reliable results."))
+            showInformation(blameWindow, _("Blame Line"), sorry)
+
+
 class BlameRevision(RepoTask):
     def broadcastProcesses(self) -> bool:
         # Don't show ProcessDialog when switching to another revision
@@ -161,10 +282,11 @@ class BlameRevision(RepoTask):
         # scrubber or nav buttons
         return isinstance(task, BlameRevision) or super().canKill(task)
 
-    def flow(self, revision: Revision, saveAndTransposePosition: bool):
+    def flow(self, revision: Revision, saveAndTransposePosition: bool, blameWindow: BlameWindow | None = None):
         from gitfourchette.blameview.blamewindow import BlameWindow
 
-        blameWindow = self.parentWidget()
+        if blameWindow is None:
+            blameWindow = self.parentWidget()  # type: ignore[assignment]
         assert isinstance(blameWindow, BlameWindow)
 
         blameModel = blameWindow.model
@@ -269,7 +391,7 @@ class BlameRevision(RepoTask):
         dummyLine0 = Revision.BlameLine(revision.commitId, 0)
         revision.blameLines.append(dummyLine0)
 
-        if revision.status == "D":
+        if revision.status == GitStatus.Deleted:
             return
 
         driver = yield from self.flowCallGit(

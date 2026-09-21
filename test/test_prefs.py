@@ -233,3 +233,28 @@ def testPrefsWorktreePathTemplateHint(mainWindow):
     control: QWidget = dlg.findChild(QWidget, "prefctl_worktreePathTemplate")
     assert control.lineEdit().placeholderText() == DEFAULT_WORKTREE_PATH_TEMPLATE
     dlg.reject()
+
+
+def testPrefsQtStyleVariantPicker(mainWindow):
+    accent1 = mainWindow.palette().highlight().color()
+
+    dlg = GFApplication.instance().openPrefsDialog("qtStyle")
+
+    group: QWidget = dlg.findChild(QWidget, "prefctl_qtStyle")
+    comboBoxes: list[QComboBox] = group.findChildren(QComboBox)
+
+    stylePicker = comboBoxes[0]
+    variantPicker = comboBoxes[1]
+
+    assert stylePicker.isVisible()
+    assert not variantPicker.isVisible()
+
+    qcbSetIndex(stylePicker, APP_DISPLAY_NAME)
+    assert variantPicker.isVisible()
+    assert variantPicker.currentText().lower() == "system colors"
+
+    qcbSetIndex(variantPicker, "dark pink")
+    dlg.accept()
+
+    accent2 = mainWindow.palette().highlight().color()
+    assert accent1 != accent2

@@ -7,7 +7,6 @@
 import re
 
 from gitfourchette.forms.commitdialog import CommitDialog
-from gitfourchette.gitdriver import GitDriver
 from gitfourchette.nav import NavLocator
 from .util import *
 
@@ -77,8 +76,8 @@ def testLfsFileToolTip(tempDir, mainWindow):
 
     tip = qlvSummonToolTip(rw.committedFiles, 0)
     tip = stripHtml(tip)
-    assert re.search(r"size:.+79 bytes \(lfs\)", tip, re.I | re.S)
-    assert re.search(r"lfs object hash:.+4b8c427", tip, re.I | re.S)
+    assert re.search(r"size:.+79 bytes \(lfs\)", tip, re.IGNORECASE | re.DOTALL)
+    assert re.search(r"lfs object hash:.+4b8c427", tip, re.IGNORECASE | re.DOTALL)
 
 
 @requiresLfs
@@ -105,7 +104,7 @@ def testLfsAddImageInWorkdir(tempDir, mainWindow):
 
     tip = qlvSummonToolTip(rw.diffArea.stagedFiles, 0)
     tip = stripHtml(tip)
-    assert re.search(r"lfs object hash:.+" + sha[:7], tip, re.I | re.S)
+    assert re.search(r"lfs object hash:.+" + sha[:7], tip, re.IGNORECASE | re.DOTALL)
 
 
 @requiresLfs
@@ -130,7 +129,7 @@ def testLfsChangeImageInWorkdir(tempDir, mainWindow):
 
     tip = qlvSummonToolTip(rw.diffArea.stagedFiles, 0)
     tip = stripHtml(tip)
-    assert re.search(r"lfs object hash:.+4b8c427.+87e67da", tip, re.I | re.S)
+    assert re.search(r"lfs object hash:.+4b8c427.+87e67da", tip, re.IGNORECASE | re.DOTALL)
 
 
 @requiresLfs
@@ -146,7 +145,7 @@ def testLfsRemoveImageInWorkdir(tempDir, mainWindow):
 
     tip = qlvSummonToolTip(rw.diffArea.dirtyFiles, 0)
     tip = stripHtml(tip)
-    assert re.search(r"lfs object hash:.+4b8c427", tip, re.I | re.S)
+    assert re.search(r"lfs object hash:.+4b8c427", tip, re.IGNORECASE | re.DOTALL)
 
     rw.diffArea.stageButton.click()
     rw.jump(NavLocator.inStaged("image1.png"), check=True)
@@ -246,7 +245,7 @@ def testLfsConvertTextToLfsInCommit(tempDir, mainWindow):
 @requiresLfs
 def testLfsConvertTextToLfsInWorkdir(tempDir, mainWindow):
     wd = unpackRepo(tempDir, "lfsrepo")
-    GitDriver.runSync("reset", "--hard", "748c251", directory=wd, strict=True)
+    shell("git reset --hard 748c251", wd)
 
     rw = mainWindow.openRepo(wd)
 
@@ -273,8 +272,7 @@ def testLfsConvertTextToLfsInWorkdir(tempDir, mainWindow):
 def testLfsObjectCacheMissing(tempDir, mainWindow):
     wd = unpackRepo(tempDir, "lfsrepo")
 
-    GitDriver.runSync("reset", "--hard", "e17a94b1", directory=wd, strict=True)
-    shutil.rmtree(Path(wd, ".git", "lfs"))
+    shell("git reset --hard e17a94b && mv .git/lfs .git/lfs-is-gone", wd)
 
     rw = mainWindow.openRepo(wd)
 
@@ -299,8 +297,7 @@ def testLfsDownloadMissingObjectsToCache(tempDir, mainWindow):
     wd = unpackRepo(tempDir, "lfsrepo")
     makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
 
-    GitDriver.runSync("reset", "--hard", "e17a94b1", directory=wd, strict=True)
-    shutil.rmtree(Path(wd, ".git", "lfs"))
+    shell("git reset --hard e17a94b && mv .git/lfs .git/lfs-is-gone", wd)
 
     rw = mainWindow.openRepo(wd)
 
@@ -320,29 +317,52 @@ def testLfsDownloadMissingObjectsToCache(tempDir, mainWindow):
     assert "int foobar(void)" in rw.diffView.toPlainText()
 
 
+@requiresLfs
 def testLfsSaveRevision(tempDir, mainWindow):
     wd = unpackRepo(tempDir, "lfsrepo")
     makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
 
+    hexIdB = "74ff36893e8e528c18cd59d9603b54f9a00210da"
+    hexIdA = "5d74f8e6ac1271eb706807e2cbfe67eef5e1e8a8"  # parent commit of the above
+
     rw = mainWindow.openRepo(wd)
 
-    rw.jump(NavLocator.inCommit(Oid(hex="74ff36893e8e528c18cd59d9603b54f9a00210da"), "textfile.c"), check=True)
+    rw.jump(NavLocator.inCommit(Oid(hex=hexIdB), "textfile.c"), check=True)
     triggerContextMenuAction(rw.committedFiles.viewport(), "save.+copy/before.+commit")
     acceptQFileDialog(rw, "save.+revision as", tempDir.name, useSuggestedName=True)
 
     # Make sure we've exported the actual contents, not the LFS pointer
-    assert "int hello(void)" in readTextFile(f"{tempDir.name}/textfile@before-74ff368.c")
+    assert "int hello(void)" in readTextFile(f"{tempDir.name}/textfile@{hexIdA[:7]}.c")
 
 
+@requiresLfs
 def testLfsSaveRevisionMissingObjectFromCache(tempDir, mainWindow):
     wd = unpackRepo(tempDir, "lfsrepo")
     makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
 
-    GitDriver.runSync("reset", "--hard", "e17a94b1", directory=wd, strict=True)
-    shutil.rmtree(Path(wd, ".git", "lfs"))
+    shell("git reset --hard e17a94b && mv .git/lfs .git/lfs-is-gone", wd)
 
     rw = mainWindow.openRepo(wd)
 
     rw.jump(NavLocator.inCommit(Oid(hex="74ff36893e8e528c18cd59d9603b54f9a00210da"), "textfile.c"), check=True)
     triggerContextMenuAction(rw.committedFiles.viewport(), "save a copy/before this commit")
-    acceptQMessageBox(rw, "save revision.+ran into an issue.+object missing from local LFS cache")
+    acceptQFileDialog(rw, "save file revision", tempDir.name, useSuggestedName=True)
+
+    # This should auto download the LFS object
+    assert "int hello(void)" in readTextFile(f"{tempDir.name}/textfile@5d74f8e.c")
+
+
+@requiresLfs
+def testLfsRestoreRevisionToWorkdir(tempDir, mainWindow):
+    wd = unpackRepo(tempDir, "lfsrepo")
+    makeBareCopy(wd, addAsRemote="localfs", preFetch=True, deleteOtherRemotes=True)
+    assert "int hello(void)" not in readTextFile(f"{wd}/textfile.c")
+
+    rw = mainWindow.openRepo(wd)
+
+    rw.jump(NavLocator.inCommit(Oid(hex="74ff36893e8e528c18cd59d9603b54f9a00210da"), "textfile.c"), check=True)
+    triggerContextMenuAction(rw.committedFiles.viewport(), "restore.+revision/before.+commit")
+    acceptQMessageBox(rw, "do you want to restore.+textfile.c")
+
+    # Make sure we've restored the actual contents, not the LFS pointer
+    assert "int hello(void)" in readTextFile(f"{wd}/textfile.c")

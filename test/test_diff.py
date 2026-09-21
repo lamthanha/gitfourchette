@@ -32,35 +32,31 @@ def testEmptyDiffEmptyFile(tempDir, mainWindow):
 
     assert not rw.diffView.isVisible()
     assert rw.specialDiffView.isVisible()
-    assert re.search(r"empty file", rw.specialDiffView.toPlainText(), re.I)
+    assert re.search(r"empty file", rw.specialDiffView.toPlainText(), re.IGNORECASE)
 
 
 @pytest.mark.skipif(WINDOWS, reason="file modes are flaky on Windows")
 def testEmptyDiffWithModeChange(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    os.chmod(f"{wd}/a/a1", 0o755)
+    Path(wd, "a/a1").chmod(0o755)
     rw = mainWindow.openRepo(wd)
 
     qlvClickNthRow(rw.dirtyFiles, 0)
-    assert re.search(r"mode change:.+(normal|regular).+executable", rw.specialDiffView.toPlainText(), re.I)
+    assert re.search(r"mode change:.+(normal|regular).+executable", rw.specialDiffView.toPlainText(), re.IGNORECASE)
 
 
 def testEmptyDiffWithNameChange(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    os.rename(f"{wd}/master.txt", f"{wd}/mastiff.txt")
-    with RepoContext(wd) as repo:
-        repo.index.remove("master.txt")
-        repo.index.add("mastiff.txt")
-        repo.index.write()
+    shell("git mv master.txt mastiff.txt", wd)
     rw = mainWindow.openRepo(wd)
 
     qlvClickNthRow(rw.stagedFiles, 0)
-    assert re.search(r"renamed:.+master\.txt.+mastiff\.txt", rw.specialDiffView.toPlainText(), re.I)
+    assert re.search(r"renamed:.+master\.txt.+mastiff\.txt", rw.specialDiffView.toPlainText(), re.IGNORECASE)
 
 
 def testDiffDeletedFile(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    os.unlink(f"{wd}/master.txt")
+    Path(wd, "master.txt").unlink()
     rw = mainWindow.openRepo(wd)
 
     qlvClickNthRow(rw.dirtyFiles, 0)
@@ -87,7 +83,7 @@ def testDiffViewStageLines(tempDir, mainWindow, method):
 
     qteClickBlock(rw.diffView, 0)
     QTest.keyPress(rw.diffView, Qt.Key.Key_Return)
-    assert re.search(r"can.t stage", mainWindow.statusBar().currentMessage(), re.I)
+    assert re.search(r"can.t stage", mainWindow.statusBar().currentMessage(), re.IGNORECASE)
     qteSelectBlocks(rw.diffView, 3, 4)
 
     assert rw.diffView.rubberBand.isVisible()
@@ -178,12 +174,12 @@ def testPartialPatchFilenameWithSpecialCharacters(tempDir, mainWindow, filename)
 def testPartialPatchPreservesExecutableFileMode(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
 
-    with RepoContext(wd) as repo:
-        os.chmod(F"{wd}/master.txt", 0o755)
-        repo.index.add_all(["master.txt"])
-        repo.create_commit_on_head("master.txt +x", TEST_SIGNATURE, TEST_SIGNATURE)
-
-    writeFile(F"{wd}/master.txt", "This file is +x now\nOn master\nOn master\nDon't stage this line\n")
+    shell("""
+        chmod 755 master.txt
+        git add master.txt
+        git commit -m 'master.txt +x'
+        echo "This file is +x now\nOn master\nOn master\nDon't stage this line\n" > master.txt
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
     assert rw.repo.status() == {"master.txt": FileStatus.WT_MODIFIED}
@@ -250,14 +246,14 @@ def testBackUpDiscardedHunkInTrash(tempDir, mainWindow):
 def testSubpatchNoEOL(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
 
-    with RepoContext(wd) as repo:
+    shell("""
         # Commit a file WITHOUT a newline at end
-        writeFile(F"{wd}/master.txt", "hello")
-        repo.index.add_all(["master.txt"])
-        repo.create_commit_on_head("no newline at end of file", TEST_SIGNATURE, TEST_SIGNATURE)
+        printf 'hello' > master.txt
+        git commit -am 'no newline at end of file'
 
         # Add a newline to the file without committing
-        writeFile(F"{wd}/master.txt", "hello\n")
+        printf 'hello\n' > master.txt
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
     assert rw.repo.status() == {"master.txt": FileStatus.WT_MODIFIED}
@@ -288,6 +284,29 @@ def testSubpatchNoEOL(tempDir, mainWindow):
     assert rw.repo.status() == {}
 
 
+@pytest.mark.skipif(QT5, reason="qteSelectBlocks finicky in Qt 5")
+def testSubpatchSelectUpToNextHunkHeader(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+
+    shell("""
+        echo '1\n2\n3\n4\n5\n6\n7\n8\n9' > master.txt
+        git commit -a -m 'change 1'
+        echo 'HEAD\n2\n3\n4\n5\n6\n7\n8\nTAIL' > master.txt
+    """, wd)
+
+    GFApplication.instance().applyPrefs(contextLines=0)
+    rw = mainWindow.openRepo(wd)
+
+    # Include hunk header
+    qteSelectBlocks(rw.diffView, 2, 3)
+    assert rw.diffView.textCursor().selectedText() == "HEAD\u2029@@ -9 +9 @@"
+
+    QTest.keyPress(rw.diffView, Qt.Key.Key_Enter)
+    stagedEntry = rw.repo.index["master.txt"]
+    stagedData = rw.repo[stagedEntry.id].peel(Blob).data.decode("utf-8")
+    assert stagedData == "1\nHEAD\n2\n3\n4\n5\n6\n7\n8\n9\n"
+
+
 @pytest.mark.parametrize("closeKey", [
     "",
     QKeySequence.StandardKey.Close,
@@ -300,8 +319,8 @@ def testDiffInNewWindow(tempDir, mainWindow, closeKey):
     rw = mainWindow.openRepo(wd)
     assert mainWindow in QApplication.topLevelWidgets()
 
-    oid = Oid(hex='1203b03dc816ccbb67773f28b3c19318654b0bc8')
-    rw.jump(NavLocator.inCommit(oid, "c/c2.txt"), check=True)
+    oid = Oid(hex="49322bb17d3acc9146f98c97d078513228bbf3c0")
+    rw.jump(NavLocator.inCommit(oid, "a/a1"), check=True)
 
     triggerContextMenuAction(rw.committedFiles.viewport(), "open diff in new window")
     QTest.qWait(0)
@@ -310,13 +329,22 @@ def testDiffInNewWindow(tempDir, mainWindow, closeKey):
     diffWidget = diffWindow.findChild(DiffView)
     assert diffWindow is not mainWindow
     assert diffWindow is diffWidget.window()
-    assert "c2.txt" in diffWindow.windowTitle()
+    assert "a1" in diffWindow.windowTitle()
     waitUntilTrue(diffWindow.isActiveWindow)
     assert not mainWindow.isActiveWindow()
 
     # Initiate search
     QTest.keySequence(diffWidget, QKeySequence.StandardKey.Find)
     waitUntilTrue(diffWidget.searchBar.isVisible)
+
+    # Make sure we can run tasks from the detached window
+    assert readTextFile(f"{wd}/a/a1").strip() == "a1"
+    triggerContextMenuAction(diffWidget.viewport(), "revert hunk")
+    acceptQMessageBox(rw, "do you want to revert this hunk")
+    assert readTextFile(f"{wd}/a/a1").strip() == ""
+    # Bring the diff window back to the foreground before continuing the test
+    diffWindow.activateWindow()
+    waitUntilTrue(diffWindow.isActiveWindow)
 
     # Make sure the diff is closed when the repowidget is gone
     if not closeKey:
@@ -437,8 +465,7 @@ def testDiffStrayLineEndings(tempDir, mainWindow):
     writeFile(f"{wd}/cr.txt", "ancient mac file\r")
 
     if WINDOWS:
-        with RepoContext(wd) as repo:
-            repo.config['core.autocrlf'] = False
+        shell("git config core.autocrlf false", wd)
 
     rw = mainWindow.openRepo(wd)
 
@@ -465,9 +492,7 @@ def testDiffStrayLineEndings(tempDir, mainWindow):
 
 def testDiffBinaryWarning(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-
-    with open(f"{wd}/binary.whatever", "wb") as f:
-        f.write(b"\x00\x00\x00\x00")
+    Path(wd, "binary.whatever").write_bytes(b"\x00\x00\x00\x00")
 
     rw = mainWindow.openRepo(wd)
     rw.jump(NavLocator.inUnstaged(path="binary.whatever"), check=True)
@@ -625,8 +650,8 @@ def testDiffTypeChange(tempDir, mainWindow):
     rw = mainWindow.openRepo(wd)
     assert rw.specialDiffView.isVisible()
     text = rw.specialDiffView.toPlainText()
-    assert re.search(r"type has changed", text, re.I)
-    assert re.search(r"old type.+regular file.+new type.+symbolic link", text, re.I | re.S)
+    assert re.search(r"type has changed", text, re.IGNORECASE)
+    assert re.search(r"old type.+regular file.+new type.+symbolic link", text, re.IGNORECASE | re.DOTALL)
 
 
 def testDiffViewSelectionStableAfterRefresh(tempDir, mainWindow):
@@ -659,11 +684,14 @@ def testDiffViewSelectionStableAfterRefresh(tempDir, mainWindow):
 def testDiffContextLinesSetting(tempDir, mainWindow, withDedicatedButton):
     wd = unpackRepo(tempDir)
 
-    with RepoContext(wd) as repo:
-        writeFile(f"{wd}/context.txt", "\n".join(f"line {i}" for i in range(1, 50)))
-        repo.index.add("context.txt")
-        repo.create_commit_on_head("context", TEST_SIGNATURE, TEST_SIGNATURE)
-        writeFile(f"{wd}/context.txt", "\n".join(f"line {i}" if i != 25 else f"LINE {i}" for i in range(1, 50)))
+    rev1 = "\n".join(f"line {i}" for i in range(1, 50))
+    rev2 = rev1.replace("line 25", "LINE 25")
+    shell(f"""
+        echo {shlex.quote(rev1)} > context.txt
+        git add context.txt
+        git commit -m 'context'
+        echo {shlex.quote(rev2)} > context.txt
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
     assert NavLocator.inUnstaged("context.txt").isSimilarEnoughTo(rw.navLocator)
@@ -1021,17 +1049,18 @@ def testRevertLineSelectionDontUseTooMuchContext(tempDir, mainWindow):
 
     wd = unpackRepo(tempDir)
 
-    with RepoContext(wd) as repo:
-        def createCommit(text):
-            writeFile(f"{wd}/master.txt", text)
-            repo.index.add_all()
-            return repo.create_commit_on_head("test permissive revert")
-        createCommit(rev1)
-        commit2 = createCommit(rev2)
-        createCommit(rev3)
+    shell(f"""
+        echo {shlex.quote(rev1.rstrip())} > master.txt && git commit -am 'rev1'
+        echo {shlex.quote(rev2.rstrip())} > master.txt && git commit -am 'rev2'
+        echo {shlex.quote(rev3.rstrip())} > master.txt && git commit -am 'rev3'
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
-    rw.jump(NavLocator.inCommit(commit2, "master.txt"), check=True)
+
+    commit2 = rw.repo.head_commit.parents[0]
+    assert commit2.message.strip() == "rev2"
+
+    rw.jump(NavLocator.inCommit(commit2.id, "master.txt"), check=True)
 
     qteSelectBlocks(rw.diffArea.diffView, 8, 9)
     assert rw.diffArea.diffView.textCursor().selectedText() == "6\u20296 Let's reverse this from rev2"
@@ -1066,11 +1095,12 @@ def testRevertLineSelectionDontUseTooMuchContext(tempDir, mainWindow):
 def testCharacterLevelDiffInUnicodeSurrogatePairs(tempDir, mainWindow, sampleText):
     wd = unpackRepo(tempDir)
 
-    with RepoContext(wd) as repo:
-        writeFile(f"{wd}/surrogatepairs.py", f"{sampleText[0]}\n# bogus context\n")
-        repo.index.add_all()
-        repo.create_commit_on_head("TEST SURROGATE PAIRS", TEST_SIGNATURE, TEST_SIGNATURE)
-        writeFile(f"{wd}/surrogatepairs.py", f"{sampleText[1]}\n# bogus context\n")
+    shell(f"""
+        echo {shlex.quote(sampleText[0] + "\n# bogus context")} > surrogatepairs.py
+        git add surrogatepairs.py
+        git commit -m 'TEST SURROGATE PAIRS'
+        echo {shlex.quote(sampleText[1] + "\n# bogus context")} > surrogatepairs.py
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
     document: QTextDocument = rw.diffView.document()
@@ -1138,7 +1168,6 @@ def testDiffExoticLineEndings(tempDir, mainWindow):
     assert expectedLines == reconstructedText[1:]
 
 
-@requiresPygments
 def testDiffTokenizationOnIndentedLineWithIgnoreAllSpace(tempDir, mainWindow):
     oldText = textwrap.dedent("""\
     void hello(void) {
@@ -1154,11 +1183,14 @@ def testDiffTokenizationOnIndentedLineWithIgnoreAllSpace(tempDir, mainWindow):
     """)
 
     wd = unpackRepo(tempDir)
-    with RepoContext(wd) as repo:
-        for revision in oldText, newText:
-            writeFile(f"{wd}/hello.c", revision)
-            repo.index.add("hello.c")
-            repo.create_commit_on_head("hello", TEST_SIGNATURE, TEST_SIGNATURE)
+    shell(f"""
+        echo {shlex.quote(oldText)} > hello.c
+        git add hello.c
+        git commit -m 'hello old'
+
+        echo {shlex.quote(newText)} > hello.c
+        git commit -am 'hello new'
+    """, wd)
 
     # Ignore whitespace for this diff.
     # Pick a scheme that applies non-default color to identifiers.
@@ -1182,3 +1214,30 @@ def testDiffTokenizationOnIndentedLineWithIgnoreAllSpace(tempDir, mainWindow):
             colorTokens.append(token)
 
     assert colorTokens == ["assignment", "=", "0x12345678", ";", "// comment"]
+
+
+def testDiffReevaluateSearchTermAcrossDocuments(tempDir, mainWindow):
+    wd = unpackRepo(tempDir)
+    rw = mainWindow.openRepo(wd)
+    searchBar = rw.diffView.searchBar
+
+    loc0 = NavLocator.inCommit(Oid(hex="c9ed7bf12c73de26422b7c5a44d74cfce5a8993b"), "c/c2-2.txt")
+    loc1 = NavLocator.inCommit(Oid(hex="83834a7afdaa1a1260568567f6ad90020389f664"), "a/a1.txt")
+    loc2 = NavLocator.inCommit(Oid(hex="83834a7afdaa1a1260568567f6ad90020389f664"), "a/a2.txt")
+    loc3 = NavLocator.inCommit(Oid(hex="49322bb17d3acc9146f98c97d078513228bbf3c0"), "a/a1")
+
+    rw.jump(loc0, check=True)
+    rw.diffView.viewport().setFocus()
+    QTest.keySequence(rw.diffView, "Ctrl+F")
+    assert searchBar.isVisible()
+    searchBar.lineEdit.setText("a1")
+    waitUntilTrue(searchBar.isRed)
+
+    rw.jump(loc1, check=True)
+    waitUntilTrue(lambda: not searchBar.isRed())
+
+    rw.jump(loc2, check=True)
+    waitUntilTrue(lambda: searchBar.isRed())
+
+    rw.jump(loc3, check=True)
+    waitUntilTrue(lambda: not searchBar.isRed())

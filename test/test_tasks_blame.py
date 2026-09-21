@@ -11,12 +11,11 @@ from contextlib import suppress
 
 import pytest
 
-from collections.abc import Generator
-from typing import Literal
+from collections.abc import Iterator
+from typing import Literal, ClassVar
 
 from gitfourchette.blameview.blamemodel import Revision
 from gitfourchette.forms.commitinfodialog import CommitInfoDialog
-from gitfourchette.gitdriver import GitDriver
 from gitfourchette.graphview.commitlogmodel import CommitLogModel
 from .util import *
 
@@ -28,7 +27,7 @@ from gitfourchette.repowidget import RepoWidget
 class BlameFixture:
     path = "hello.txt"
 
-    revs = {
+    revs: ClassVar = {
         "workdir": NULL_OID,  # Workdir changes
         "head": Oid(hex="2be5719152d4f82c7302b1c0932d8e5f0a4a0e98"),  # HEAD
         "french": Oid(hex="4ec4389a8068641da2d6578db0419484972284c8"),  # Say hello in French
@@ -38,7 +37,7 @@ class BlameFixture:
 
     unrelatedOid = Oid(hex="5470a671a80ac3789f1a6a8cefbcf43ce7af0563")
 
-    history = [
+    history: ClassVar = [
         revs["workdir"],
         revs["head"],
         revs["french"],
@@ -48,7 +47,7 @@ class BlameFixture:
 
 
 @pytest.fixture
-def blameWindow(tempDir, mainWindow) -> Generator[BlameWindow, None, None]:
+def blameWindow(tempDir, mainWindow) -> Iterator[BlameWindow]:
     wd = unpackRepo(tempDir, "testrepoformerging")
 
     # Edit file so we have some uncommitted changes
@@ -339,7 +338,7 @@ def testBlameGutterFitsWidestAuthorInHistory(tempDir, mainWindow):
     longLastName = "Featherstonehaugh"
 
     wd = unpackRepo(tempDir, "testrepoformerging")
-    runShellScript(
+    shell(
         f"export GIT_AUTHOR_NAME='Bartholomew {longLastName}'\n"
         'export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"\n'
         f"echo 'hallo welt' >> {BlameFixture.path}\n"
@@ -395,7 +394,6 @@ def testBlameUnborn(tempDir, mainWindow):
     acceptQMessageBox(mainWindow, "no commits in this repository")
 
 
-@requiresPygments
 def testBlameSyntaxHighlighting(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
 
@@ -409,18 +407,19 @@ def testBlameSyntaxHighlighting(tempDir, mainWindow):
           - name: "goodbye"
           - scalar: 1234
         """)
-    oids = []
 
-    with RepoContext(wd) as repo:
-        for i, revision in enumerate([text1, text2], start=1):
-            writeFile(f"{wd}/SomeNewFile.yml", revision)
-            repo.index.add_all()
-            oid = repo.create_commit_on_head(f"syntaxtest{i}", TEST_SIGNATURE, TEST_SIGNATURE)
-            oids.append(oid)
+    shell(f"""
+        echo {shlex.quote(text1)} > SomeNewFile.yml
+        git add SomeNewFile.yml && git commit -m syntaxtest1
+        echo {shlex.quote(text2)} > SomeNewFile.yml
+        git add SomeNewFile.yml && git commit -m syntaxtest2
+    """, wd)
 
     # Open blame window on the commit that produced text1
     rw = mainWindow.openRepo(wd)
-    rw.jump(NavLocator.inCommit(oids[0], "SomeNewFile.yml"), check=True)
+    oid1 = rw.repo.head_commit.parent_ids[0]
+
+    rw.jump(NavLocator.inCommit(oid1, "SomeNewFile.yml"), check=True)
     triggerMenuAction(mainWindow.menuBar(), "view/blame")
     blameWindow = findWindow("blame", BlameWindow)
     assert "syntaxtest1" in blameWindow.scrubber.currentText()
@@ -451,22 +450,23 @@ def testBlameTransposeScrollPositionsAcrossRevisions(tempDir, mainWindow):
     ]
 
     wd = unpackRepo(tempDir)
-    oids = []
-    with RepoContext(wd) as repo:
-        for i, snapshot in enumerate(fileHistory):
-            writeFile(f"{wd}/hello.c", snapshot)
-            repo.index.add_all()
-            oid = repo.create_commit_on_head(f"revision {i}", TEST_SIGNATURE, TEST_SIGNATURE)
-            oids.append(oid)
+    shell(f"""
+        echo {shlex.quote(fileHistory[0].rstrip())} > hello.c && git add hello.c && git commit -m 'revision 0'
+        echo {shlex.quote(fileHistory[1].rstrip())} > hello.c && git commit -am 'revision 1'
+        echo {shlex.quote(fileHistory[2].rstrip())} > hello.c && git commit -am 'revision 2'
+        echo {shlex.quote(fileHistory[3].rstrip())} > hello.c && git commit -am 'revision 3'
+    """, wd)
 
     rw = mainWindow.openRepo(wd)
-    rw.jump(NavLocator.inCommit(oids[0], "hello.c"), check=True)
+    oid0 = rw.repo.head_commit.parents[0].parents[0].parent_ids[0]
+
+    rw.jump(NavLocator.inCommit(oid0, "hello.c"), check=True)
     triggerMenuAction(mainWindow.menuBar(), "view/blame")
 
     blameWindow = findWindow("blame", BlameWindow)
     assert blameWindow.textEdit.toPlainText() == fileHistory[0]
     assert blameWindow.scrubber.count() == len(fileHistory)
-    assert blameWindow.scrubber.currentText() == "revision 0"
+    assert blameWindow.scrubber.currentText() == "revision 0\n"
     vsb = blameWindow.textEdit.verticalScrollBar()
     assert vsb.isVisible()
     vsb.setValue(numPaddingLines)
@@ -474,19 +474,19 @@ def testBlameTransposeScrollPositionsAcrossRevisions(tempDir, mainWindow):
 
     # Go up 1 revision - Line numbers identical. Exact 'foo' line should be found.
     blameWindow.newerButton.click()
-    assert blameWindow.scrubber.currentText() == "revision 1"
+    assert blameWindow.scrubber.currentText() == "revision 1\n"
     assert blameWindow.textEdit.toPlainText() == fileHistory[1]
     assert blameWindow.textEdit.firstVisibleBlock().text() == "int foo=1;"
 
     # Go up 1 revision - One new line was added above 'foo' line. Exact 'foo' line should still be found.
     blameWindow.newerButton.click()
-    assert blameWindow.scrubber.currentText() == "revision 2"
+    assert blameWindow.scrubber.currentText() == "revision 2\n"
     assert blameWindow.textEdit.toPlainText() == fileHistory[2]
     assert blameWindow.textEdit.firstVisibleBlock().text() == "int foo=1;"
 
     # Go up 1 revision - 'foo' line was deleted, so rely on raw line numbers.
     blameWindow.newerButton.click()
-    assert blameWindow.scrubber.currentText() == "revision 3"
+    assert blameWindow.scrubber.currentText() == "revision 3\n"
     assert blameWindow.textEdit.toPlainText() == fileHistory[3]
     assert blameWindow.textEdit.firstVisibleBlock().text() == "int bar=2;"
 
@@ -558,7 +558,6 @@ def testReevaluateBlameSearchTermAcrossRevisions(blameWindow, taskThread):
     # Go to "Say hello in French" via combobox
     qcbSetIndex(blameWindow.scrubber, "say hello in french")
     waitUntilTrue(lambda: not searchBar.isRed())
-
 
 
 # -----------------------------------------------------------------------------
@@ -645,7 +644,7 @@ def testBlameDeletedFileInWorkdir(tempDir, mainWindow):
 @pytest.mark.parametrize("method", ["menubar", "context"])
 def testBlameRenamedFileInWorkdir(tempDir, mainWindow, method):
     wd = unpackRepo(tempDir)
-    GitDriver.runSync("mv", "master.txt", "renamed.txt", directory=wd, strict=True)
+    shell("git mv master.txt renamed.txt", wd)
 
     rw = mainWindow.openRepo(wd)
     rw.jump(NavLocator.inStaged("renamed.txt"), check=True)
@@ -675,8 +674,8 @@ def testBlameMissingRevisions(blameWindow):
     rw = blameWindow._unitTestRepoWidget
 
     # Create a fake commit
-    with RepoContext(rw.repo) as repo:
-        missingId = repo.create_commit_on_head("fake missing rev", TEST_SIGNATURE, TEST_SIGNATURE)
+    shell("git commit --allow-empty -m'fake missing rev'", rw.repo.workdir)
+    missingId = rw.repo.head_commit_id
     rw.refreshRepo()
 
     shortMissingId = str(missingId)[:7]
@@ -689,9 +688,6 @@ def testBlameMissingRevisions(blameWindow):
     # The application must respond gracefully beyond this point
     blameWindow.repaint()
 
-    blameWindow.textEdit.setFocus()
-    assert blameWindow.textEdit.hasFocus()
-
     linePos = qteBlockPoint(blameWindow.textEdit, 0)
     text = summonToolTip(blameWindow.textEdit.gutter, linePos).lower()
     assert "test person" in text
@@ -700,3 +696,74 @@ def testBlameMissingRevisions(blameWindow):
 
     menu = summonContextMenu(blameWindow.textEdit.viewport(), QPoint(4, 4))
     assert not findMenuAction(menu, f"blame file at.+{shortMissingId}").isEnabled()
+
+
+def testBlameDiscoverUpperBoundOnOtherBranch(tempDir, mainWindow):
+    wd = unpackRepo(tempDir, "testrepoformerging")
+
+    shell("""
+        git switch i18n
+        echo 'tschuess' >> bye.txt
+        git commit -am 'Say bye in German'
+
+        git switch pep8-fixes
+        echo 'hasta luego' >> bye.txt
+        git commit -am 'Say bye in Spanish'
+
+        git switch master
+        echo 'tot ziens' > bye.txt
+        git add bye.txt
+        git commit -am 'Say bye in Dutch'
+    """, wd)
+
+    addByeTxtOnI18n = Oid(hex="5470a671a80ac3789f1a6a8cefbcf43ce7af0563")
+    addByeTxtOnPep8 = Oid(hex="03490f16b15a09913edb3a067a3dc67fbb8d41f1")
+
+    rw = mainWindow.openRepo(wd)
+
+    rw.jump(NavLocator.inCommit(addByeTxtOnI18n, "bye.txt"), check=True)
+    triggerContextMenuAction(rw.committedFiles.viewport(), "blame")
+    blameWindow = findWindow("blame", BlameWindow)
+    messages = [rw.repo[s.commitId].peel(Commit).message.strip()
+                for s in blameWindow.model.revList.sequence]
+    assert messages == ["Say bye in German", "added bye.txt and new"]
+    blameWindow.close()
+
+    rw.jump(NavLocator.inCommit(addByeTxtOnPep8, "bye.txt"), check=True)
+    triggerContextMenuAction(rw.committedFiles.viewport(), "blame")
+    blameWindow = findWindow("blame", BlameWindow)
+    messages = [rw.repo[s.commitId].peel(Commit).message.strip()
+                for s in blameWindow.model.revList.sequence]
+    assert messages == ["Say bye in Spanish", "new file bye.txt"]
+    blameWindow.close()
+
+
+def testBlameLine(tempDir, mainWindow):
+    wd = unpackRepo(tempDir, "testrepoformerging")
+
+    # Blame a line on a non-checked-out branch to ensure the blame window
+    # presents the revlist from that other branch.
+    shell("""
+        git switch i18n
+        echo 'hejsan allihopa' >> hello.txt
+        git commit -am 'Say hello in Swedish'
+        git switch master
+    """, wd)
+
+    rw = mainWindow.openRepo(wd)
+    oid = rw.repo.branches.local['i18n'].target
+
+    rw.jump(NavLocator.inCommit(oid, "hello.txt"), check=True)
+
+    # We'll blame a line that exists in both master and i18n, but we want to
+    # show the revlist from i18n.
+    bp = qteBlockPoint(rw.diffView, 2)
+    triggerContextMenuAction(rw.diffView.viewport(), "blame line.+hola mundo", bp)
+
+    blameWindow = findWindow("blame", t=BlameWindow)
+    assert blameWindow.textEdit.textCursor().selectedText() == "hola mundo"
+    assert blameWindow.scrubber.currentText().strip() == "Say hello in Spanish"
+
+    messages = [rw.repo[s.commitId].peel(Commit).message.strip()
+                for s in blameWindow.model.revList.sequence]
+    assert messages == ["Say hello in Swedish", "Say hello in French", "Say hello in Spanish", "First commit"]

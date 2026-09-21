@@ -4,9 +4,7 @@
 # For full terms, see the included LICENSE file.
 # -----------------------------------------------------------------------------
 
-from gitfourchette import colors
 from gitfourchette.qt import *
-from gitfourchette.toolbox import isDarkTheme
 
 
 class CodeRubberBand(QWidget):
@@ -26,11 +24,8 @@ class CodeRubberBand(QWidget):
         outlineColor: QColor = palette.color(QPalette.ColorRole.Base)
         outlineColor.setAlphaF(.75 if outlineColor.lightnessF() < .5 else .5)  # light mode: subtler alpha
 
-        if self.parent().hasFocus():
-            try:
-                penColor = palette.accent().color()
-            except AttributeError:  # pragma: no cover - TODO: Remove once we can drop compatibility with Qt <6.7.
-                penColor = colors.teal if isDarkTheme() else colors.blue
+        if self.parentWidget().hasFocus():
+            penColor = palette.accent().color()
         else:
             penColor = palette.color(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight)
 

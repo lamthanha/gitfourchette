@@ -6,12 +6,13 @@
 
 from gitfourchette.blameview.blamemodel import BlameModel
 from gitfourchette.graphview.commitlogdelegate import CommitLogDelegate
-from gitfourchette.graphview.commitlogmodel import CommitToolTipZone
 from gitfourchette.graphview.graphpaint import paintGraphFrame
 from gitfourchette.localization import *
 from gitfourchette.porcelain import Oid
 from gitfourchette.qt import *
 from gitfourchette.toolbox import stockIcon
+
+_emptyOidSet: set[Oid] = set()
 
 
 class BlameScrubberDelegate(CommitLogDelegate):
@@ -37,21 +38,20 @@ class BlameScrubberDelegate(CommitLogDelegate):
             index: QModelIndex,
             rect: QRect,
             oid: Oid,
-            toolTips: list[CommitToolTipZone]
     ):
+        assert oid is not None
         revision = self.blameModel.revList.revisionForCommit(oid)
 
         # Graph frame
         graphRect = QRect(rect)
-        paintGraphFrame(painter, graphRect, oid, self.blameModel.graph, set())
+        paintGraphFrame(painter, graphRect, oid, self.blameModel.graph, _emptyOidSet)
         rect.setLeft(graphRect.right())
 
         # Icon
         iconRect = QRect(rect)
         iconSize = min(16, iconRect.height())
         iconRect.setWidth(iconSize)
-        statusLetter = "A" if revision.status == "?" else revision.status
-        icon = stockIcon(f"status_{statusLetter.lower()}")
+        icon = stockIcon(f"status_{revision.status.lower()}")
         icon.paint(painter, iconRect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         rect.setLeft(iconRect.right() + 5)
 

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import Any, ClassVar
 
 from gitfourchette import tasks
 from gitfourchette.localization import *
@@ -19,12 +19,12 @@ from gitfourchette.toolbox import MultiShortcut, makeMultiShortcut, ActionDef, e
 class TaskBook:
     """ Registry of metadata about task commands """
 
-    names: dict[type[RepoTask], str] = {}
-    toolbarNames: dict[type[RepoTask], str] = {}
-    tips: dict[type[RepoTask], str] = {}
-    shortcuts: dict[type[RepoTask], MultiShortcut] = {}
-    icons: dict[type[RepoTask], str] = {}
-    noEllipsis: set[type[RepoTask]]
+    names       : ClassVar[dict[type[RepoTask], str]] = {}
+    toolbarNames: ClassVar[dict[type[RepoTask], str]] = {}
+    tips        : ClassVar[dict[type[RepoTask], str]] = {}
+    shortcuts   : ClassVar[dict[type[RepoTask], MultiShortcut]] = {}
+    icons       : ClassVar[dict[type[RepoTask], str]] = {}
+    noEllipsis  : ClassVar[set[type[RepoTask]]] = set()
 
     @classmethod
     def retranslate(cls):
@@ -68,7 +68,6 @@ class TaskBook:
             tasks.InteractiveRebase: _("Interactive rebase"),
             tasks.Jump: _("Navigate in repo"),
             tasks.JumpBack: _("Navigate back"),
-            tasks.JumpBackOrForward: _("Navigate forward"),
             tasks.JumpForward: _("Navigate forward"),
             tasks.JumpToHEAD: _("Go to HEAD commit"),
             tasks.JumpToUncommittedChanges: _("Go to Working Directory"),
@@ -85,6 +84,9 @@ class TaskBook:
             tasks.NewTag: _("New tag"),
             tasks.NewWorktree: _("New worktree"),
             tasks.OpenBlame: _("Blame file"),
+            tasks.OpenInDiffTool: _("Open in external diff tool"),
+            tasks.OpenMergeTool: _("Open in merge tool"),
+            tasks.OpenRevisionInEditor: _("Open file revision"),
             tasks.PruneWorktrees: _("Prune worktrees"),
             tasks.QueryCommitsTouchingPath: _("Find commits touching path"),
             tasks.PullBranch: _("Pull remote branch"),
@@ -104,6 +106,7 @@ class TaskBook:
             tasks.RevertCommit: _("Revert commit"),
             tasks.SetUpGitIdentity: _("Git identity"),
             tasks.EditRepoSettings: _("Repository settings"),
+            tasks.SaveRevisionAs: _("Save file revision as"),
             tasks.SkipRebase: _("Skip commit and continue rebase"),
             tasks.SquashCommits: _("Squash commits"),
             tasks.StageFiles: _("Stage files"),

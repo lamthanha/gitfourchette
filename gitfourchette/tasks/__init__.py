@@ -67,7 +67,6 @@ from gitfourchette.tasks.misctasks import (
 from gitfourchette.tasks.jumptasks import (
     Jump,
     JumpBack,
-    JumpBackOrForward,
     JumpForward,
     JumpToHEAD,
     JumpToUncommittedChanges,
@@ -102,11 +101,15 @@ from gitfourchette.tasks.indextasks import (
     DiscardFiles,
     DiscardModeChanges,
     HardSolveConflicts,
+    OpenMergeTool,
     ApplyPatchData,
     StageFiles,
     UnstageFiles,
     UnstageModeChanges,
     RestoreRevisionToWorkdir,
+    SaveRevisionAs,
+    OpenRevisionInEditor,
+    OpenInDiffTool,
 )
 
 from gitfourchette.tasks.stashtasks import (

@@ -1,14 +1,14 @@
 # -----------------------------------------------------------------------------
-# Copyright (C) 2025 Iliyas Jorio.
+# Copyright (C) 2026 Iliyas Jorio.
 # This file is part of GitFourchette, distributed under the GNU GPL v3.
 # For full terms, see the included LICENSE file.
 # -----------------------------------------------------------------------------
 
+from gitfourchette import trtables
 from gitfourchette.forms.ui_signatureform import Ui_SignatureForm
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
 
 
 class SignatureOverride(enum.IntEnum):
@@ -27,7 +27,7 @@ class SignatureForm(QWidget):
             validate_signature_item(item)
             return ""
         except NameValidationError as exc:
-            return TrTables.enum(exc.rule)
+            return trtables.enum(exc.rule)
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -45,9 +45,6 @@ class SignatureForm(QWidget):
         self.ui.timeEdit.timeChanged.connect(self.signatureChanged)
         self.ui.offsetEdit.currentIndexChanged.connect(self.signatureChanged)
         self.ui.nowButton.clicked.connect(self.setDateTimeNow)
-
-        # Qt 6.8.2 inexplicably makes QSpinBoxes super tall with Breeze/Oxygen styles
-        self.ui.timeEdit.setMaximumHeight(32)
 
     def setSignature(self, signature: Signature):
         qdt = signatureQDateTime(signature)

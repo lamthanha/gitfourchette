@@ -23,7 +23,7 @@ def testRepoBindingKeyMainWorktree(tempDir):
 
 def testRepoBindingKeyLinkedWorktree(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript("git worktree add ../LinkedWT", wd)
+    shell("git worktree add ../LinkedWT", wd)
     linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
     assert tabcolors.repoBindingKey(linked) == os.path.realpath(wd)
 
@@ -37,7 +37,7 @@ def testRepoBindingKeySymlinkedPath(tempDir):
 
 def testRepoBindingKeyBareRepo(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript("git clone --bare . ../Bare.git", wd)
+    shell("git clone --bare . ../Bare.git", wd)
     bare = os.path.join(os.path.dirname(os.path.normpath(wd)), "Bare.git")
     assert tabcolors.repoBindingKey(bare) == os.path.realpath(bare)
 
@@ -143,7 +143,7 @@ def _tabIconKey(mainWindow, i: int):
 
 def _openMainAndLinkedWorktree(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript("git worktree add ../LinkedWT", wd)
+    shell("git worktree add ../LinkedWT", wd)
     linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
     rwMain = mainWindow.openRepo(wd)
     rwChild = mainWindow.openRepo(linked)
@@ -283,7 +283,7 @@ def testOrphanOverrideKeepsWorktreeMenuOnSingleWorktreeRepo(tempDir, mainWindow)
 def testRepoHasLinkedWorktrees(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
     assert not tabcolors.repoHasLinkedWorktrees(wd)
-    runShellScript("git worktree add ../LinkedWT", wd)
+    shell("git worktree add ../LinkedWT", wd)
     linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
     assert tabcolors.repoHasLinkedWorktrees(wd)
     assert tabcolors.repoHasLinkedWorktrees(linked)
@@ -553,7 +553,7 @@ def testOverflowMenuShowsColorDots(tempDir, mainWindow):
 
 def testOverflowMenuGhostHeaderShowsBindingColor(tempDir, mainWindow):
     wd = unpackRepo(tempDir, renameTo="BeansApp")
-    runShellScript("git worktree add ../WtAlpha", wd)
+    shell("git worktree add ../WtAlpha", wd)
     linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "WtAlpha")
     other = unpackRepo(tempDir, renameTo="TypingGame")
 

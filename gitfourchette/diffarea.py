@@ -123,6 +123,7 @@ class DiffArea(QWidget):
 
     def _makeDirtyContainer(self, repoModel):
         header = QElidedLabel(" ")
+        header.setProperty("class", "panelTitle")
         header.setObjectName("dirtyHeader")
         header.setToolTip(_("Unstaged files: will not be included in the commit unless you stage them."))
         header.setMinimumHeight(FILEHEADER_HEIGHT)
@@ -176,6 +177,7 @@ class DiffArea(QWidget):
     def _makeStageContainer(self, repoModel):
         header = QElidedLabel(" ")
         header.setObjectName("stagedHeader")
+        header.setProperty("class", "panelTitle")
         header.setToolTip(_("Staged files: will be included in the commit."))
         header.setMinimumHeight(FILEHEADER_HEIGHT)
         header.setEnabled(False)
@@ -248,6 +250,7 @@ class DiffArea(QWidget):
 
         header = QElidedLabel(" ")
         header.setObjectName("committedHeader")
+        header.setProperty("class", "panelTitle")
         header.setMinimumHeight(FILEHEADER_HEIGHT)
         header.setEnabled(False)
 
@@ -269,6 +272,7 @@ class DiffArea(QWidget):
     def _makeDiffContainer(self, repoModel):
         header = QLabel(" ")
         header.setObjectName("diffHeader")
+        header.setProperty("class", "panelTitle")
         header.setMinimumHeight(FILEHEADER_HEIGHT)
         header.setContentsMargins(4, 0, 4, 0)
         header.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)

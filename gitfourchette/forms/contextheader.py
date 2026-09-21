@@ -7,7 +7,6 @@
 from collections.abc import Callable
 
 from gitfourchette import colors
-from gitfourchette.application import GFApplication
 from gitfourchette.localization import *
 from gitfourchette.nav import NavLocator, NavContext
 from gitfourchette.qt import *
@@ -39,14 +38,6 @@ class ContextHeader(QFrame):
         self.maximizeButton.setToolTip(_("Maximize the diff area and hide the commit graph"))
         self.maximizeButton.setCheckable(True)
 
-        self.restyle()
-        GFApplication.instance().restyle.connect(self.restyle)
-
-    def restyle(self):
-        bg = mutedTextColorHex(self, .07)
-        fg = mutedTextColorHex(self, .8)
-        self.setStyleSheet(f"ContextHeader {{ background-color: {bg}; }}  ContextHeader QLabel {{ color: {fg}; }}")
-
     def addButton(
             self,
             text: str,
@@ -65,7 +56,8 @@ class ContextHeader(QFrame):
         if callback is not None:
             button.clicked.connect(callback)
 
-        layout: QHBoxLayout = self.layout()
+        layout = self.layout()
+        assert isinstance(layout, QBoxLayout)
         insertionIndex = layout.indexOf(self.spacerItem)
         if not stickToLabel:
             insertionIndex += 1

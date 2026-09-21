@@ -5,14 +5,14 @@
 # -----------------------------------------------------------------------------
 
 import logging
-from collections.abc import Generator
 
 from pygit2 import hash as hashObject
 
 from gitfourchette import settings
+from gitfourchette.codeview.codewindow import CodeWindow
 from gitfourchette.diffview.diffdocument import DiffDocument
 from gitfourchette.forms.repostub import RepoStub
-from gitfourchette.gitdriver import GitDelta, GitDeltaFile, GitConflict, GitDriver
+from gitfourchette.gitdriver import GitDelta, GitDeltaFile, GitStatus, GitConflict, GitDriver
 from gitfourchette.gitdriver.lfspointer import LfsObjectCacheMissingError
 from gitfourchette.gitdriver.parsers import parseAheadBehind
 from gitfourchette.syntax.lexercache import LexerCache
@@ -24,9 +24,8 @@ from gitfourchette.localization import *
 from gitfourchette.nav import NavLocator, NavFlags, NavContext
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
-from gitfourchette.tasks.repotask import RepoTask, TaskEffects, FlowControlToken, AbortTask
+from gitfourchette.tasks.repotask import RepoTask, TaskEffects, AbortTask
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
 from gitfourchette.worktrees import parseWorktreeListPorcelain
 
 logger = logging.getLogger(__name__)
@@ -36,7 +35,7 @@ RENAME_COUNT_THRESHOLD = 100
 
 LONG_LINE_THRESHOLD = 10_000
 
-TAbstractDiffDocument = DiffDocument | GitConflict | ImageDelta | SpecialDiffError
+type TAbstractDiffDocument = DiffDocument | GitConflict | ImageDelta | SpecialDiffError
 
 
 class PrimeRepo(RepoTask):
@@ -59,7 +58,7 @@ class PrimeRepo(RepoTask):
         from gitfourchette.repomodel import RepoModel
         from gitfourchette.tasks import Jump
 
-        mainWindow: MainWindow = repoStub.window()
+        mainWindow = repoStub.window()
         assert isinstance(repoStub, RepoStub)
         assert isinstance(mainWindow, MainWindow)
 
@@ -127,7 +126,7 @@ class PrimeRepo(RepoTask):
             maxCommits = settings.prefs.maxCommits
         if maxCommits == 0:  # 0 means infinity
             maxCommits = 2**63  # ought to be enough
-        progressInterval = 1000 if maxCommits >= 10000 else 1000
+        progressInterval = 1000
 
         commitSequence = [repoModel.uncommittedChangesMockCommit()]
 
@@ -249,8 +248,6 @@ class PrimeRepo(RepoTask):
 
 
 class LoadPatch(RepoTask):
-    diffDocument: TAbstractDiffDocument
-
     def canKill(self, task: RepoTask):
         return isinstance(task, LoadPatch)
 
@@ -278,13 +275,13 @@ class LoadPatch(RepoTask):
             # Prime lexer
             diff.oldLexJob, diff.newLexJob = self._primeLexJobs(delta)
 
-        self.diffDocument = diff
+        return diff
 
     def _getPatch(
             self,
             delta: GitDelta,
             locator: NavLocator,
-    ) -> Generator[FlowControlToken, None, TAbstractDiffDocument]:
+    ) -> RepoTask.Flow[TAbstractDiffDocument]:
         if delta.conflict is not None:
             return delta.conflict
 
@@ -295,7 +292,7 @@ class LoadPatch(RepoTask):
             return SpecialDiffError.noChange(self.repo, delta)
 
         # Special formatting for TYPECHANGE.
-        if delta.status == "T":  # TYPECHANGE
+        if delta.status == GitStatus.TypeChanged:
             return SpecialDiffError.typeChange(delta)
 
         # ---------------------------------------------------------------------
@@ -308,9 +305,9 @@ class LoadPatch(RepoTask):
             hasOldLfs = bool(delta.old.lfs)
             hasNewLfs = bool(delta.new.lfs)
 
-            if delta.status == "D":
+            if delta.status == GitStatus.Deleted:
                 loadLfs = hasOldLfs
-            elif delta.status in "?A":
+            elif delta.status.isAddedOrUntracked:
                 loadLfs = hasNewLfs
             else:
                 loadLfs = hasOldLfs and hasNewLfs
@@ -426,7 +423,8 @@ class LoadPatch(RepoTask):
         elif file.hasDiskStat():
             # Blob SHA-1 not available, but we've got a stat
             # (E.g. unstaged modification to an LFS file)
-            key = file.diskStat
+            mtime, size = file.diskStat
+            key = f"disk:{mtime},{size}"
         else:
             raise NotImplementedError("need valid blob id or stat for lexing")
 
@@ -458,45 +456,35 @@ class LoadPatch(RepoTask):
         return job
 
 
-class LoadPatchInNewWindow(LoadPatch):
+class LoadPatchInNewWindow(RepoTask):
     def flow(self, delta: GitDelta, locator: NavLocator):
-        yield from super().flow(delta, locator)
+        if CodeWindow.activateExistingWindow(locator):
+            return
 
-        diffDocument = self.diffDocument
+        diffDocument = yield from self.flowSubtask(LoadPatch, delta, locator)
+
         if not isinstance(diffDocument, DiffDocument):
             raise AbortTask(_("Only text diffs may be opened in a separate window."), icon="information")
 
         from gitfourchette.diffview.diffview import DiffView
 
-        if locator.context == NavContext.COMMITTED:
-            title = f"{locator.path} @ {shortHash(locator.commit)}"
-        elif self.context.isWorkdir():
-            title = f"{locator.path} [{TrTables.enum(locator.context)}]"
-        else:
-            title = locator.path
+        assert locator.context == NavContext.COMMITTED
+        title = f"{locator.path} @ {shortHash(locator.commit)}"
 
-        diffWindow = QWidget(self.parentWidget())
+        diffWindow = CodeWindow(DiffView, locator)
         diffWindow.setObjectName("DetachedDiffWindow")
         diffWindow.setWindowTitle(title)
-        diffWindow.setWindowFlag(Qt.WindowType.Window, True)
-        diffWindow.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-
-        diff = DiffView(diffWindow)
-        diff.isDetachedWindow = True
-        diff.setFrameStyle(QFrame.Shape.NoFrame)
+        diff = diffWindow.codeView
+        assert isinstance(diff, DiffView)
         diff.replaceDocument(self.repo, delta, locator, diffDocument)
 
-        layout = QVBoxLayout(diffWindow)
-        layout.setContentsMargins(QMargins())
-        layout.setSpacing(0)
-        layout.addWidget(diff)
-        layout.addWidget(diff.searchBar)
+        # Let detached window run tasks on RepoWidget.taskRunner
+        diffWindow.taskRunner = self.rw.taskRunner
 
-        diffWindow.resize(550, 700)
+        # Kill detached window when RepoWidget is gone
+        self.rw.aboutToDelete.connect(diffWindow.close)
+
         diffWindow.show()
-
-        diff.setUpAsDetachedWindow()  # Required for detached windows
-
 
 class DownloadLfsObjects(RepoTask):
     def flow(self, errors: LfsObjectCacheMissingError, informativeName: str = ""):

@@ -12,8 +12,7 @@ _stockIconCache: dict[int, QIcon] = {}
 _stockIconHtmlCache: dict[int, str] = {}
 
 # Override some icon IDs depending on desktop environment
-_overrideIconIds = {}
-_overrideIconIdsReady = False
+_overrideIconIds: dict[str, str] = {}
 
 _autoDarkVariants = {
     "achtung",
@@ -31,8 +30,10 @@ _autoDarkVariants = {
 }
 
 
-def _iconOverrideTable():
-    overrides = {}
+def _iconOverrideTable() -> dict[str, str]:
+    overrides = {
+        "status_?": "status_a",  # Use Added icon for Untracked
+    }
 
     assert QApplication.instance(), "need app instance for QIcon.themeName()"
     iconTheme = QIcon.themeName().casefold()
@@ -50,10 +51,9 @@ def _iconOverrideTable():
 
 def stockIcon(iconId: str, colorTable="") -> QIcon:
     # Special cases
-    global _overrideIconIdsReady
-    if not _overrideIconIdsReady:
-        _overrideIconIds.clear()
+    if not _overrideIconIds:
         _overrideIconIds.update(_iconOverrideTable())
+        assert _overrideIconIds, "expecting overrides to contain at least one entry"
     iconId = _overrideIconIds.get(iconId, iconId)
 
     if RecolorSvgIconEngine.IconColors.preferDarkVariants and iconId in _autoDarkVariants:
@@ -109,13 +109,14 @@ def stockIconImgTag(iconId: str, dpr: float = 0) -> str:
         app = QApplication.instance()
         try:
             # Use mainWindow's dpr
-            dpr = app.mainWindow.devicePixelRatio()
+            window: QMainWindow = app.mainWindow  # type: ignore[attr-defined]
+            dpr = window.devicePixelRatio()
         except AttributeError:
             # Too early, no window yet; fall back to highest dpr on the system.
             # Note: on Wayland, this may be higher than the actual dpr if
             # fractional scaling is enabled (e.g. this may return 2.0 if your
             # system is set up for 1.25 frac scaling)
-            dpr = app.devicePixelRatio()
+            dpr = app.devicePixelRatio()  # type: ignore[attr-defined]  # incomplete stubs
 
     key = hash(iconId) ^ hash(dpr)
 
@@ -147,3 +148,6 @@ def stockIconImgTag(iconId: str, dpr: float = 0) -> str:
 def clearStockIconCache():
     _stockIconCache.clear()
     _stockIconHtmlCache.clear()
+
+    # Force reevaluate color scheme
+    RecolorSvgIconEngine.IconColors.initialized = False

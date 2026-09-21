@@ -8,6 +8,8 @@ import logging
 from contextlib import suppress
 from pathlib import Path
 
+import pygit2
+
 from gitfourchette.forms.brandeddialog import convertToBrandedDialog
 from gitfourchette.forms.checkoutcommitdialog import CheckoutCommitDialog
 from gitfourchette.forms.commitdialog import CommitDialog
@@ -55,9 +57,9 @@ class NewCommit(RepoTask):
             yield from self.flowConfirm(
                 title=_("Create empty commit"),
                 verb=_("Empty commit"),
-                text=paragraphs(text))
+                text=paragraphs(*text))
 
-        yield from self.flowSubtask(SetUpGitIdentity, _("Proceed to Commit"))
+        yield from self.flowSubtask(SetUpGitIdentity, self.name())
 
         repositoryState = self.repo.state()
         fallbackSignature = self.repo.default_signature
@@ -74,6 +76,7 @@ class NewCommit(RepoTask):
             emptyCommit=emptyCommit,
             gpgFlag=gpgFlag,
             gpgKey=gpgKey,
+            hooks=self.preCommitHookNames(self.repo),
             parent=self.parentWidget())
 
         if buttonCaption:  # Fork: e.g. "Commit and Push" (Shift+Commit)
@@ -100,6 +103,8 @@ class NewCommit(RepoTask):
         signatureIsOverridden = overriddenSignatureKind != SignatureOverride.Nothing
         explicitGpgSign = cd.ui.gpg.explicitSign()
         explicitNoGpgSign = cd.ui.gpg.explicitNoSign()
+        explicitNoVerify = cd.ui.hookButton.explicitNoVerify()
+        signoff = cd.ui.signoffButton.explicitSign()
 
         # Save commit message/signature as draft now,
         # so we don't lose it if the commit operation fails or is rejected.
@@ -119,7 +124,9 @@ class NewCommit(RepoTask):
             message, author, committer,
             repositoryState=repositoryState,
             explicitGpgSign=explicitGpgSign,
-            explicitNoGpgSign=explicitNoGpgSign)
+            explicitNoGpgSign=explicitNoGpgSign,
+            explicitNoVerify=explicitNoVerify,
+            signoff=signoff)
         driver = yield from self.flowCallGit(*args, env=env)
 
         branchName, newHash = driver.readPostCommitInfo()
@@ -143,6 +150,11 @@ class NewCommit(RepoTask):
         return gpgFlag, gpgKey
 
     @staticmethod
+    def preCommitHookNames(repo: Repo) -> list[str]:
+        return [hook for hook in ("pre-commit", "commit-msg")
+                if Path(repo.in_gitdir("hooks/" + hook)).exists()]
+
+    @staticmethod
     def prepareGitCommand(
             message: str,
             author: Signature | None,
@@ -151,16 +163,27 @@ class NewCommit(RepoTask):
             amend=False,
             explicitGpgSign=False,
             explicitNoGpgSign=False,
+            explicitNoVerify=False,
+            signoff=False,
     ):
+        def signatureEnvironmentVariables(sig: Signature, infix: str) -> dict[str, str]:
+            return {
+                f"GIT_{infix}_NAME": sig.name,
+                f"GIT_{infix}_EMAIL": sig.email,
+                f"GIT_{infix}_DATE": f"{sig.time}{formatTimeOffset(sig.offset)}",
+            }
+
         # Git ignores GIT_AUTHOR_* when amending or concluding a cherrypick
         # unless we pass --reset-author.
-        resetAuthor = author and (amend or repositoryState == RepositoryState.CHERRYPICK)
+        resetAuthor = bool(author and (amend or repositoryState == RepositoryState.CHERRYPICK))
 
         args = [
             "-c", "core.abbrev=no",
             "commit",
             *argsIf(explicitGpgSign, "--gpg-sign"),
             *argsIf(explicitNoGpgSign, "--no-gpg-sign"),
+            *argsIf(explicitNoVerify, "--no-verify"),
+            *argsIf(signoff, "--signoff"),
             *argsIf(amend, "--amend"),
             *argsIf(resetAuthor, "--reset-author"),
             "--allow-empty",
@@ -168,7 +191,7 @@ class NewCommit(RepoTask):
             f"--message={message}"
         ]
 
-        env = {}
+        env: dict[str, str] = {}
 
         if author is not None:
             env |= signatureEnvironmentVariables(author, "AUTHOR")
@@ -196,7 +219,7 @@ class AmendCommit(RepoTask):
         # Jump to workdir
         yield from self.flowSubtask(Jump, NavLocator.inWorkdir())
 
-        yield from self.flowSubtask(SetUpGitIdentity, _("Proceed to Amend Commit"))
+        yield from self.flowSubtask(SetUpGitIdentity, self.name())
 
         repositoryState = self.repo.state()
         headCommit = self.repo.head_commit
@@ -215,6 +238,7 @@ class AmendCommit(RepoTask):
             emptyCommit=emptyCommit,
             gpgFlag=gpgFlag,
             gpgKey=gpgKey,
+            hooks=NewCommit.preCommitHookNames(self.repo),
             parent=self.parentWidget())
 
         cd.setWindowModality(Qt.WindowModality.WindowModal)
@@ -235,6 +259,8 @@ class AmendCommit(RepoTask):
         committer = cd.getOverriddenCommitterSignature() or fallbackSignature
         explicitGpgSign = cd.ui.gpg.explicitSign()
         explicitNoGpgSign = cd.ui.gpg.explicitNoSign()
+        explicitNoVerify = cd.ui.hookButton.explicitNoVerify()
+        signoff = cd.ui.signoffButton.explicitSign()
 
         self.epilog.effects |= TaskEffects.Workdir | TaskEffects.Refs | TaskEffects.Head
         args, env = NewCommit.prepareGitCommand(
@@ -242,10 +268,12 @@ class AmendCommit(RepoTask):
             repositoryState=repositoryState,
             amend=True,
             explicitGpgSign=explicitGpgSign,
-            explicitNoGpgSign=explicitNoGpgSign)
+            explicitNoGpgSign=explicitNoGpgSign,
+            explicitNoVerify=explicitNoVerify,
+            signoff=signoff)
         driver = yield from self.flowCallGit(*args, env=env)
 
-        branchName, newHash = driver.readPostCommitInfo()
+        _branchName, newHash = driver.readPostCommitInfo()
         newOid = Oid(hex=newHash)
 
         # Trust this commit if we've just signed it
@@ -274,7 +302,7 @@ class SetUpGitIdentity(RepoTask):
         # Fall back to a sensible path if the identity comes from /etc/gitconfig or some other systemwide file
         if editLevel not in [GitConfigLevel.XDG, GitConfigLevel.GLOBAL]:
             # Favor XDG path if we can, otherwise use ~/.gitconfig
-            if FREEDESKTOP and GitSettings.search_path[GitConfigLevel.XDG]:
+            if FREEDESKTOP and pygit2.settings.search_path[GitConfigLevel.XDG]:
                 editLevel = GitConfigLevel.XDG
             else:
                 editLevel = GitConfigLevel.GLOBAL
@@ -285,9 +313,9 @@ class SetUpGitIdentity(RepoTask):
                              self.repo.has_local_identity(), self.parentWidget())
 
         if okButtonText:
-            dlg.ui.buttonBox.button(QDialogButtonBox.StandardButton.Ok).setText(okButtonText)
+            proceed = _("Proceed to {0}", englishTitleCase(okButtonText))
+            dlg.ui.buttonBox.button(QDialogButtonBox.StandardButton.Ok).setText(proceed)
 
-        dlg.resize(512, 0)
         dlg.setWindowModality(Qt.WindowModality.WindowModal)
         yield from self.flowDialog(dlg)
 
@@ -315,7 +343,7 @@ class CheckoutCommit(RepoTask):
         refs = [r for r in refs if r.startswith((RefPrefix.HEADS, RefPrefix.REMOTES))]
 
         commitMessage = self.repo.get_commit_message(oid)
-        commitMessage, junk = messageSummary(commitMessage)
+        commitMessage, _junk = messageSummary(commitMessage)
         anySubmodules = bool(self.repo.listall_submodules_fast())
 
         dlg = CheckoutCommitDialog(
@@ -380,7 +408,7 @@ class NewTag(RepoTask):
 
     def flow(self, oid: Oid = NULL_OID, annotation: str | None = None):
         if annotation is not None:
-            yield from self.flowSubtask(SetUpGitIdentity, _("Proceed to New Tag"))
+            yield from self.flowSubtask(SetUpGitIdentity, self.name())
 
         repo = self.repo
         if oid is None or oid == NULL_OID:
@@ -394,7 +422,6 @@ class NewTag(RepoTask):
                            remotes=self.repoModel.remotes,
                            parent=self.parentWidget())
 
-        dlg.setFixedHeight(dlg.sizeHint().height())
         yield from self.flowDialog(dlg)
 
         tagName = dlg.ui.nameEdit.text()
@@ -442,7 +469,6 @@ class DeleteTag(RepoTask):
             self.repoModel.remotes,
             parent=self.parentWidget())
 
-        dlg.setFixedHeight(dlg.sizeHint().height())
         yield from self.flowDialog(dlg)
 
         pushIt = dlg.ui.pushCheckBox.isChecked()
@@ -478,14 +504,20 @@ class RevertCommit(RepoTask):
 
         self.epilog.effects |= TaskEffects.Workdir
 
-        # Don't raise AbortTask if git returns non-0
-        yield from self.flowCallGit("revert", "--no-commit", "--no-edit", str(oid), autoFail=False)
+        driver = yield from self.flowCallGit("revert", "--no-commit", "--no-edit", str(oid), autoFail=False)
+
+        # 0: Successful (or dud)
+        # 1: Conflicts
+        # 128: Local changes would be overwritten, etc.
+        exitCode = driver.exitCode()
+        if exitCode not in [0, 1]:
+            raise AbortTask(driver.htmlErrorText(), details=driver.formatCommandLine())
 
         # Refresh libgit2 index for conflict analysis
         yield from self.flowEnterWorkerThread()
         self.repo.refresh_index()
 
-        anyConflicts = repo.any_conflicts
+        anyConflicts = exitCode != 0
         dud = not anyConflicts and not repo.any_staged_changes
 
         # If reverting didn't do anything, don't let the REVERT state linger.
@@ -493,14 +525,13 @@ class RevertCommit(RepoTask):
         if dud:
             repo.state_cleanup()
 
+        # Back to UI thread
         yield from self.flowEnterUiThread()
 
         if dud:
             info = _("There’s nothing to revert from {0} "
                      "that the current branch hasn’t already undone.", bquo(shortHash(oid)))
             raise AbortTask(info, "information")
-
-        yield from self.flowEnterUiThread()
 
         repoModel.prefs.draftCommitMessage = self.repo.message_without_conflict_comments
         repoModel.prefs.setDirty()
@@ -530,9 +561,10 @@ class CherrypickCommit(RepoTask):
         driver = yield from self.flowCallGit("cherry-pick", "--no-commit", str(oid), autoFail=False)
 
         exitCode = driver.exitCode()
-        logger.debug(f"cherry-pick rc={exitCode}")
         if exitCode not in [0, 1]:
-            raise NotImplementedError(f"'git cherry-pick' exit code {exitCode}")
+            # Surface Git's own error message instead of an opaque exception
+            # (e.g. exit code 128 when local changes would be overwritten).
+            raise AbortTask(driver.htmlErrorText(), details=driver.formatCommandLine())
 
         yield from self.flowEnterWorkerThread()
 

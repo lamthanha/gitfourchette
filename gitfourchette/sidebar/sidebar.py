@@ -9,6 +9,7 @@ import warnings
 from collections.abc import Callable, Iterable
 from contextlib import suppress
 
+from gitfourchette import trtables
 from gitfourchette import porcelain
 from gitfourchette import settings
 from gitfourchette.application import GFApplication
@@ -21,12 +22,11 @@ from gitfourchette.qt import *
 from gitfourchette.repomodel import RepoModel, UC_FAKEREF
 from gitfourchette.repoprefs import RefSort
 from gitfourchette.sidebar.sidebardelegate import SidebarDelegate, SidebarClickZone
-from gitfourchette.sidebar.sidebarmodel import SidebarModel, SidebarNode, SidebarItem
 from gitfourchette.sidebar.sidebarfilter import SidebarFilter
+from gitfourchette.sidebar.sidebarmodel import SidebarModel, SidebarNode, SidebarItem
 from gitfourchette.sidebar.sidebarsearch import SidebarSearch
 from gitfourchette.tasks import *
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
 from gitfourchette.webhost import WebHost
 from gitfourchette.worktrees import WorktreeInfo, worktreeName
 
@@ -147,9 +147,10 @@ class Sidebar(QTreeView):
             self.restoreSelectionBackup()
 
         submenu = []
-        for sortMode, caption in TrTables._enums[RefSort].items():
-            if not caption:  # Skip UseGlobalPref
+        for sortMode in RefSort:
+            if sortMode == RefSort.UseGlobalPref:
                 continue
+            caption = trtables.enum(sortMode)
             action = ActionDef(
                 caption,
                 lambda m=sortMode: setSortMode(m),
@@ -556,7 +557,7 @@ class Sidebar(QTreeView):
             ]
 
         elif item == SidebarItem.TagsHeader:
-            refspecs = [ref for ref in self.sidebarModel.repoModel.refs.keys()
+            refspecs = [ref for ref in self.sidebarModel.repoModel.refs
                         if ref.startswith(RefPrefix.TAGS)]
 
             actions += [
@@ -807,7 +808,7 @@ class Sidebar(QTreeView):
             DeleteTag.invoke(self, data.removeprefix(RefPrefix.TAGS))
 
         elif item == SidebarItem.RefFolder:
-            prefix, name = RefPrefix.split(data)
+            prefix, _name = RefPrefix.split(data)
             if prefix == RefPrefix.HEADS:
                 DeleteBranchFolder.invoke(self, data)
             else:
@@ -924,7 +925,7 @@ class Sidebar(QTreeView):
 
     def mousePressEvent(self, event: QMouseEvent):
         pos = event.position().toPoint()
-        index, node, zone = self.resolveClick(pos)
+        index, _node, zone = self.resolveClick(pos)
 
         # Save click info for mouseReleaseEvent
         self.mousePressCache = (index.row(), zone)
@@ -971,13 +972,13 @@ class Sidebar(QTreeView):
             self.wantToggleStarNode(node)
             event.accept()
         else:
-            warnings.warn(f"Unknown click zone {zone}")
+            warnings.warn(f"Unknown click zone {zone}")  # type: ignore[unreachable]
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         # NOT calling "super().mouseDoubleClickEvent(event)" on purpose.
 
         pos = event.position().toPoint()
-        index, node, zone = self.resolveClick(pos)
+        _index, node, zone = self.resolveClick(pos)
 
         # Let user collapse/expand/hide a single node in quick succession
         # without triggering a double click

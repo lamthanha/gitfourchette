@@ -10,8 +10,9 @@ import gc
 import logging
 import os
 import sys
+import textwrap
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 # Import as few internal modules as possible here to avoid premature initialization
 # from cascading imports before the QApplication has booted.
@@ -71,6 +72,7 @@ class GFApplication(QApplication):
         self.installedLocale = None
         self.qtbaseTranslator = QTranslator(self)
         self.sshAgent = None
+        self.restylingGuard = 0
 
         # Show an error dialog in case of unhandled exceptions.
         # Note that debuggers may override the exception hook.
@@ -99,8 +101,23 @@ class GFApplication(QApplication):
         if not (MACOS and APP_FREEZE_COMMIT):
             self.setWindowIcon(QIcon("assets:icons/forkette.png"))
 
-        # Get system default style name before applying further styling
-        self.platformDefaultStyleName = self.style().objectName()
+        # Get system default style & palette before applying further styling
+        from gitfourchette.themes import ThemeName
+        bootStyleName = self.style().objectName().lower()
+        self.platformStandardAccent = self.palette().accent().color()
+        if APP_TESTMODE and OFFSCREEN:
+            # Don't force-set Qt style at the start of every offscreen test.
+            # Don't touch default (Fusion) for pixel-perfect accuracy.
+            assert bootStyleName == "fusion"
+            self.platformDefaultStyleName = ""
+        elif KDE and bootStyleName != "fusion":  # pragma: no cover
+            # On KDE, be a good citizen and stick to system-provided theme
+            # (unless we don't have anything better than Fusion, e.g. in the
+            # AppImage's embedded Qt libraries)
+            self.platformDefaultStyleName = bootStyleName
+        else:  # pragma: no cover
+            # On other platforms, default to a custom theme.
+            self.platformDefaultStyleName = ThemeName.BuiltIn
 
         # Install translators for system language
         # (for command line parser to display localized text)
@@ -126,9 +143,6 @@ class GFApplication(QApplication):
         # Schedule cleanup on quit
         self.aboutToQuit.connect(self.endSession)
 
-        # Listen for palette change events
-        self.restyle.connect(self.onRestyle)
-
         from gitfourchette.globalshortcuts import GlobalShortcuts
         from gitfourchette.tasks import TaskBook
 
@@ -144,19 +158,21 @@ class GFApplication(QApplication):
     # -------------------------------------------------------------------------
 
     def createTempDir(self):
-        tempDirPath = os.environ.get("GITFOURCHETTE_TEMPDIR", "")
-        if tempDirPath:
+        path: str | Path = os.environ.get("GITFOURCHETTE_TEMPDIR", "")
+        if path:
             pass
         elif FLATPAK:
             # Flatpak guarantees that "/run/user/1000/app/org.gitfourchette.gitfourchette" sits on a tmpfs,
             # and "/tmp" actually resolves to "/run/user/1000/app/org.gitfourchette.gitfourchette/tmp".
             # Use the real path instead of "/tmp" (QDir.tempPath() default value)
             # so that we can pass it to external tools outside our sandbox.
-            tempDirPath = Path(XDG_RUNTIME_DIR, "app", FLATPAK_ID)
-            assert tempDirPath.exists(), f"Expected to find Flatpak temp dir at: {tempDirPath}"
+            path = Path(XDG_RUNTIME_DIR, "app", FLATPAK_ID)
+            assert path.exists(), f"Expected to find Flatpak temp dir at: {path}"
         else:
-            tempDirPath = QDir.tempPath()
-        tempDirTemplate = str(Path(tempDirPath, self.applicationName()))
+            path = QDir.tempPath()
+
+        path = Path(path, self.applicationName())
+        tempDirTemplate = str(path)
         self.tempDir = QTemporaryDir(tempDirTemplate)
         self.tempDir.setAutoRemove(True)
 
@@ -275,8 +291,7 @@ class GFApplication(QApplication):
         # Initialize mountpoint manager
         self.mountManager = MountManager(self)
 
-        self.applyQtStylePref(forceApplyDefault=False)
-        self.onRestyle()
+        self.applyQtStylePref()
         self.mainWindow = MainWindow()
 
         # Bind window signals
@@ -447,12 +462,16 @@ class GFApplication(QApplication):
         self.dispatchSimplePrefsToStandaloneClasses()
 
         if "qtStyle" in prefDiff:
-            self.applyQtStylePref(forceApplyDefault=True)
+            self.applyQtStylePref()
 
         if "language" in prefDiff:
             self.applyLanguagePref()
 
-        if "ownSshAgent" in prefDiff:
+        resetSshAgent = "ownSshAgent" in prefDiff
+        # Flatpak: If git's sandboxed state changes, we need to recreate
+        # ssh-agent to be (non-)sandboxed accordingly
+        resetSshAgent |= FLATPAK and "gitPath" in prefDiff
+        if resetSshAgent:
             self.applySshAgentPref()
 
         # ---------------------------------------------------------------------
@@ -473,25 +492,89 @@ class GFApplication(QApplication):
 
     def applyLanguagePref(self):
         from gitfourchette import settings
-        from gitfourchette.trtables import TrTables
+        from gitfourchette import trtables
         from gitfourchette.tasks.taskbook import TaskBook
 
         self.installTranslators(settings.prefs.language)
 
         # Regenerate rosetta stones
-        TrTables.retranslate()
+        trtables.retranslate(settings.prefs.language)
         TaskBook.retranslate()
 
-    def applyQtStylePref(self, forceApplyDefault: bool):
-        from gitfourchette import settings
+    def applyQtStylePref(self, paletteOnly=False):
+        self.restylingGuard += 1
+        try:
+            self._applyQtStylePref(paletteOnly)
+        finally:
+            self.restylingGuard -= 1
 
-        if settings.prefs.qtStyle:
-            self.setStyle(settings.prefs.qtStyle)
-        elif forceApplyDefault:
-            self.setStyle(self.platformDefaultStyleName)
+    def _applyQtStylePref(self, paletteOnly=False):
+        from gitfourchette import settings
+        from gitfourchette.syntax.colorscheme import ColorScheme
+        from gitfourchette.toolbox import mixColors, iconbank
+        from gitfourchette.themes import ThemeColors
+
+        effectiveStyle = settings.prefs.qtStyle
+
+        if not effectiveStyle:
+            effectiveStyle = self.platformDefaultStyleName
+
+        # See if it's a custom theme
+        accent = self.platformStandardAccent
+        customTheme = ThemeColors.resolveTheme(effectiveStyle, accent)
+        if customTheme:
+            effectiveStyle = ThemeColors.bestStyleEngine()
+            palette = customTheme.buildPalette()
+        else:
+            palette = QPalette()
+        # Set custom palette, or reset standard palette
+        self.setPalette(palette)
+
+        # ----------------------------------------------------------------------
+        # Build stylesheet
+
+        qss = Path(QFile("assets:style/base.qss").fileName()).read_text()
+
+        # Palette-dependent styling
+        windowColor = self.palette().color(QPalette.ColorRole.Window)
+        textColor = self.palette().color(QPalette.ColorRole.Text)
+        headerBg = mixColors(windowColor, textColor, .07)
+        headerFg = mixColors(windowColor, textColor, .82)
+        faintSep = mixColors(windowColor, textColor, .18)
+        qss += textwrap.dedent(f"""
+            ContextHeader {{ background-color: {headerBg.name()}; }}
+            ContextHeader QLabel {{ color: {headerFg.name()}; }}
+            QFaintSeparator {{ background: {faintSep.name()}; color: transparent; }}
+        """)
+
+        if MACOS:  # Strip iOS-y QMessageBox styling (all bold)
+            qss += "QMessageBox QLabel {font-weight: normal;}"
+
+        # Append our own theme, if any (its rules take precedence over the above)
+        if customTheme is not None:
+            qss += customTheme.buildStyleSheet()
+
+        # Install the stylesheet. It's OK to re-evaluate the same stylesheet if
+        # the QSS is identical (needed to react to system palette changes)
+        self.setStyleSheet(qss)
+
+        # ----------------------------------------------------------------------
+
+        # Set Qt style
+        if effectiveStyle and not paletteOnly:
+            self.setStyle(effectiveStyle)
 
         if MACOS:
             self.setAttribute(Qt.ApplicationAttribute.AA_DontShowIconsInMenus, settings.qtIsNativeMacosStyle())
+
+        # ----------------------------------------------------------------------
+
+        # Force RecolorSvgIconEngine to re-render the icons
+        iconbank.clearStockIconCache()
+        QPixmapCache.clear()
+
+        # Reset syntax highlighting fallback
+        ColorScheme.refreshFallbackScheme()
 
     def applySshAgentPref(self):
         from gitfourchette import settings
@@ -570,41 +653,26 @@ class GFApplication(QApplication):
 
         elif eventType == QEvent.Type.PaletteChange and watched is self.mainWindow:
             # Recolor some widgets when palette changes (light to dark or vice-versa).
-            # Tested in KDE Plasma 6 and macOS 15.
-            self.restyle.emit()
+            if not self.restylingGuard:
+                # Save new accent color from environment before tweaking palette (e.g. KDE color change)
+                self.platformStandardAccent = self.palette().accent().color()
+                try:
+                    self.applyQtStylePref(paletteOnly=True)
+                finally:
+                    self.restyle.emit()  # tell other widgets about it
 
         elif eventType == QEvent.Type.StatusTip:
             # Eat QStatusTipEvent. The menubar emits those when a menu is hovered;
             # but since we don't use status tips, the status bar is cleared for no reason.
             if APP_DEBUG:
-                assert not event.tip(), "assuming QStatusTipEvent is always empty"
+                tip: str = event.tip() # type: ignore[attr-defined] # incomplete stubs
+                assert not tip, "assuming QStatusTipEvent is always empty"
             return True
 
         elif eventType == QEvent.Type.Show and isinstance(watched, QDialog):
             self.installDialogReturnShortcut(watched)
 
         return False
-
-    # -------------------------------------------------------------------------
-
-    def onRestyle(self):
-        from gitfourchette.toolbox.iconbank import clearStockIconCache
-        from gitfourchette.toolbox.qtutils import isDarkTheme
-        from gitfourchette.syntax.colorscheme import ColorScheme
-        from gitfourchette.toolbox.recolorsvgiconengine import RecolorSvgIconEngine
-
-        # Force RecolorSvgIconEngine to re-render the icons
-        clearStockIconCache()
-        QPixmapCache.clear()
-        RecolorSvgIconEngine.IconColors.refresh()
-
-        styleSheet = Path(QFile("assets:style.qss").fileName()).read_text()
-        if isDarkTheme():  # Append dark override
-            darkSupplement = Path(QFile("assets:style-dark.qss").fileName()).read_text()
-            styleSheet += darkSupplement
-        self.setStyleSheet(styleSheet)
-
-        ColorScheme.refreshFallbackScheme()
 
     # -------------------------------------------------------------------------
     # Utilities

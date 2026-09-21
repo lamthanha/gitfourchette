@@ -11,7 +11,7 @@ from gitfourchette.application import GFApplication
 from gitfourchette.localization import *
 from gitfourchette.qt import *
 from gitfourchette.toolbox import stockIcon
-from gitfourchette.toolbox.qtutils import CallbackAccumulator
+from gitfourchette.toolbox.qtutils import CallbackAccumulator, reevaluateStyleSheet
 
 
 class QTabBar2(QTabBar):
@@ -53,6 +53,11 @@ class QTabBar2(QTabBar):
         hint = super().tabSizeHint(index)
 
         w = 32 + self.fontMetrics().horizontalAdvance(text)
+
+        if self.tabsClosable():
+            closeWidth = self.style().pixelMetric(QStyle.PixelMetric.PM_TabCloseIndicatorWidth)
+            w += 2 * closeWidth
+
         w = min(w, 250)
 
         hint.setWidth(w)
@@ -207,7 +212,7 @@ class QTabWidget2(QWidget):
         self.stacked = QStackedWidget(self)
         self.stacked.setObjectName("QTW2StackedWidget")
 
-        self.shadowCurrentWidgetRef = weakref.ref(self)
+        self.shadowCurrentWidgetRef: weakref.ref[QWidget] = weakref.ref(self)
         """ Keep a weakref instead of a real reference to not impede GC of a
         dead widget. (A weakref on self stands in for "none".) """
 
@@ -282,6 +287,8 @@ class QTabWidget2(QWidget):
         return self.tabs.count()
 
     def refreshPrefs(self):
+        mustReevaluateStyleSheet = settings.prefs.expandingTabs != self.tabs.expanding()
+
         self.tabs.setExpanding(settings.prefs.expandingTabs)
         self.tabs.setAutoHide(settings.prefs.autoHideTabs)
         self.tabs.setTabsClosable(settings.prefs.tabCloseButton)
@@ -289,6 +296,9 @@ class QTabWidget2(QWidget):
         self.syncBarSize()
         self.onResize()
         self.updateOverflowDropdown()
+
+        if mustReevaluateStyleSheet:
+            reevaluateStyleSheet(self)
 
     def onCustomContextMenuRequested(self, localPoint: QPoint):
         globalPoint = self.tabs.mapToGlobal(localPoint)

@@ -85,7 +85,7 @@ def testListWorktreesRealRepo(tempDir, mainWindow):
     # on master already, and git refuses to check out an already-checked-out
     # branch in a second worktree ("fatal: 'master' is already used by
     # worktree at ..."). Verified with `git branch -a` in the unpacked repo.
-    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    shell("git worktree add ../LinkedWT no-parent", wd)
     infos = worktrees.listWorktrees(wd)
     assert len(infos) == 2
     assert infos[1].branch == "refs/heads/no-parent"
@@ -104,7 +104,7 @@ def testSyncWorktreesDetectsChanges(tempDir, mainWindow):
     assert len(model.worktrees) == 1  # primed at load
     assert not model.syncWorktrees()  # no change
 
-    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    shell("git worktree add ../LinkedWT no-parent", wd)
     assert model.syncWorktrees()      # change detected
     assert len(model.worktrees) == 2
     assert not model.syncWorktrees()  # stable again
@@ -112,7 +112,7 @@ def testSyncWorktreesDetectsChanges(tempDir, mainWindow):
 
 def _openRepoWithLinkedWorktree(tempDir, mainWindow):
     wd = unpackRepo(tempDir)
-    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    shell("git worktree add ../LinkedWT no-parent", wd)
     linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
     rw = mainWindow.openRepo(wd)
     return wd, linked, rw
@@ -146,7 +146,7 @@ def testWorktreesSectionAlwaysVisibleEvenWithoutLinked(tempDir, mainWindow):
 def testWorktreesListedFromLinkedWorktreeTab(tempDir, mainWindow):
     from gitfourchette.sidebar.sidebarmodel import SidebarItem
     wd = unpackRepo(tempDir)
-    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    shell("git worktree add ../LinkedWT no-parent", wd)
     linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
     rw = mainWindow.openRepo(linked)
     nodes = rw.sidebar.findNodesByKind(SidebarItem.Worktree)
@@ -178,7 +178,7 @@ def testWorktreeSidebarRefreshAfterExternalChange(tempDir, mainWindow):
     rw = mainWindow.openRepo(wd)
     assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 1
 
-    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    shell("git worktree add ../LinkedWT no-parent", wd)
     rw.refreshRepo()  # autoRefresh path picks up external changes
     assert rw.sidebar.countNodesByKind(SidebarItem.Worktree) == 2
 
@@ -545,11 +545,11 @@ def testMainMarkerFollowsWorktreeAddAndRemove(tempDir, mainWindow):
     rw = mainWindow.openRepo(wd)
     assert not mainWindow.tabs.tabs.tabText(mainWindow.tabs.currentIndex()).startswith("[M] ")
 
-    runShellScript("git worktree add ../MarkerWT no-parent", wd)
+    shell("git worktree add ../MarkerWT no-parent", wd)
     rw.refreshRepo()
     assert mainWindow.tabs.tabs.tabText(mainWindow.tabs.currentIndex()).startswith("[M] ")
 
-    runShellScript("git worktree remove ../MarkerWT", wd)
+    shell("git worktree remove ../MarkerWT", wd)
     rw.refreshRepo()
     assert not mainWindow.tabs.tabs.tabText(mainWindow.tabs.currentIndex()).startswith("[M] ")
 
@@ -570,7 +570,7 @@ def testNewWorktreeNameFieldNotSqueezedByLongBaseRef(tempDir, mainWindow):
     # newRow, and the combo's sizeHint ballooning with its longest item).
     longName = "very-long-branch-name-like-664-add-earn-transaction-analytics-events"
     wd = unpackRepo(tempDir)
-    runShellScript(f"git branch {longName}", wd)
+    shell(f"git branch {longName}", wd)
     rw = mainWindow.openRepo(wd)
 
     from gitfourchette.tasks import NewWorktree
@@ -595,7 +595,7 @@ def testNewWorktreeBaseRefPopupNotElided(tempDir, mainWindow):
     # widest item even though the closed box stays capped.
     longName = "very-long-branch-name-like-664-add-earn-transaction-analytics-events"
     wd = unpackRepo(tempDir)
-    runShellScript(f"git branch {longName}", wd)
+    shell(f"git branch {longName}", wd)
     rw = mainWindow.openRepo(wd)
 
     from gitfourchette.tasks import NewWorktree
@@ -824,7 +824,7 @@ def testNewTabOpensAdjacentToSameRepoSiblings(tempDir, mainWindow):
     # asserts the extraction path is free; see test/util.py:262).
     otherWd = unpackRepo(tempDir, renameTo="UnrelatedRepo")
     wd = unpackRepo(tempDir)
-    runShellScript("git worktree add ../LinkedWT no-parent", wd)
+    shell("git worktree add ../LinkedWT no-parent", wd)
     linked = os.path.join(os.path.dirname(os.path.normpath(wd)), "LinkedWT")
 
     mainWindow.openRepo(wd)

@@ -11,13 +11,14 @@ from gitfourchette.localization import *
 from gitfourchette.nav import NavContext
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
+from gitfourchette.repomodel import RepoModel
 from gitfourchette.tasks import *
 from gitfourchette.toolbox import *
 
 
 class DirtyFiles(FileList):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs, navContext=NavContext.UNSTAGED)
+    def __init__(self, repoModel: RepoModel, parent: QWidget):
+        super().__init__(repoModel, parent, NavContext.UNSTAGED)
 
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
@@ -77,16 +78,8 @@ class DirtyFiles(FileList):
                     _n("Merge Conflict", "{n} Merge Conflicts", n),
                     kind=ActionDef.Kind.Section,
                 ),
-
-                ActionDef(
-                    _("Resolve by Accepting “Theirs”"),
-                    self.mergeTakeTheirs,
-                ),
-
-                ActionDef(
-                    _("Resolve by Keeping “Ours”"),
-                    self.mergeKeepOurs,
-                ),
+                ActionDef(_("Keep OUR version") + "\u2026", lambda: self.hardSolve(True)),
+                ActionDef(_("Accept THEIR version") + "\u2026", lambda: self.hardSolve(False)),
             ]
 
         elif onlySubmodules:
@@ -129,6 +122,9 @@ class DirtyFiles(FileList):
         actions += super().contextMenuActions(deltas)
         return actions
 
+    def wantStageOrUnstage(self):
+        self.stage()
+
     def stage(self):
         deltas = list(self.selectedDeltas())
         StageFiles.invoke(self, deltas)
@@ -147,30 +143,9 @@ class DirtyFiles(FileList):
         deltas = list(self.selectedDeltas())
         DiscardModeChanges.invoke(self, deltas)
 
-    def _mergeKeep(self, keepOurs: bool):
-        conflicts = self.repo.index.conflicts
-        restore = []
-        remove = []
-
-        for path in self.selectedPaths():
-            ancestor, ours, theirs = conflicts[path]
-            keepEntry = ours if keepOurs else theirs
-            if keepEntry is not None:
-                assert keepEntry.path == path
-                restore.append(keepEntry.path)
-            else:
-                remove.append(path)
-
-        if keepOurs:
-            HardSolveConflicts.invoke(self, restore, [], remove)
-        else:
-            HardSolveConflicts.invoke(self, [], restore, remove)
-
-    def mergeKeepOurs(self):
-        self._mergeKeep(keepOurs=True)
-
-    def mergeTakeTheirs(self):
-        self._mergeKeep(keepOurs=False)
+    def hardSolve(self, keepOurs: bool):
+        conflicts = [delta.conflict for delta in self.selectedDeltas()]
+        HardSolveConflicts.invoke(self, conflicts, keepOurs)
 
     def ignoreSelection(self):
         selected = list(self.selectedPaths())

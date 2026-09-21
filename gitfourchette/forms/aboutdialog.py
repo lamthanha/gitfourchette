@@ -4,17 +4,19 @@
 # For full terms, see the included LICENSE file.
 # -----------------------------------------------------------------------------
 
+import json
 import sys
 from pathlib import Path
 from textwrap import dedent
 
 import pygit2
+import pygments
 
+from gitfourchette.forms.prefsdialog import availableLocaleCodes, localeCodeToLanguageName
 from gitfourchette.forms.ui_aboutdialog import Ui_AboutDialog
 from gitfourchette.gitdriver import GitDriver
 from gitfourchette.localization import *
 from gitfourchette.qt import *
-from gitfourchette.syntax import pygmentsVersion
 from gitfourchette.toolbox import *
 from gitfourchette import settings
 
@@ -48,6 +50,7 @@ class AboutDialog(QDialog):
 
         buildInfoItems = [
             "Flatpak" if FLATPAK else "",
+            "AppImage" if "APPIMAGE" in INITIAL_ENVIRONMENT else "",
             APP_FREEZE_DATE,
             APP_FREEZE_COMMIT[:7]
         ]
@@ -79,20 +82,8 @@ class AboutDialog(QDialog):
         self.ui.mugshot.setText("")
         self.ui.mugshot.setPixmap(QPixmap("assets:icons/mug"))
 
-        aboutBlurb = paragraphs(
-            linkify(_("If {app} helps you get work done, "
-                      "please consider [making a small donation].", app=appName), DONATE_URL),
-            _("Thank you for your support!"))
-        self.ui.aboutBlurb.setText(aboutBlurb)
-
         # ---------------------------------------------------------------------
         # Components page
-
-        qtBindingSuffix = ""
-
-        gitPath = settings.prefs.gitPath
-        gitVersion = GitDriver.gitVersion() or _("(unknown version)")
-        gitInfo = f"<b>git</b> {gitVersion} <small>({gitPath})</small>"
 
         try:
             from gitfourchette.mount.treemount import fuse
@@ -100,21 +91,28 @@ class AboutDialog(QDialog):
         except (ImportError, OSError, AttributeError):
             fuseInfo = _("(not available)")
 
-        self.ui.componentsBlurb.setText(dedent(f"""<html>\
-            {appName} {appVersion}
-            {buildInfo}
-            <br>{_("Powered by:")}
-            <ul style='margin: 0'>
-            <li>{gitInfo}
-            <li><b>git-lfs</b> {GitDriver.lfsVersion() or _('(not available)')}
-            <li><b>pygit2</b> {pygit2.__version__}
-            <li><b>libgit2</b> {pygit2.LIBGIT2_VERSION} <small>({', '.join(getPygit2FeatureStrings())})</small>
-            <li><b>{QT_BINDING}</b> {QT_BINDING_VERSION}{qtBindingSuffix}
-            <li><b>Qt</b> {qVersion()}
-            <li><b>mfusepy</b> {fuseInfo}
-            <li><b>Pygments</b> {pygmentsVersion or _('(not available)')}
-            <li><b>Python</b> {'.'.join(str(i) for i in sys.version_info)}
-            </ul>
+        self.ui.aboutBlurb.setText(dedent(f"""\
+            <style>
+                a {{ font-weight: bold; }}
+                hr {{ background: gray; }}
+                table {{ font-size: 8pt; margin-top: 0em; }}
+                th {{ text-align: left; padding-right: 1em; color: gray; }}
+            </style>
+            <p>{linkify(_("If {app} helps you get work done, please consider [making a small donation].", app=appName), DONATE_URL)}</p>
+            <p>{_("Thank you for your support!")}</p>
+            <hr>
+            <table cellspacing=0 cellpadding=0>
+            <tr><th colspan=2>{appName} {appVersion}</th></tr>
+            <tr><th>Git</th><td>{GitDriver.gitVersion() or _("(unknown version)")} ({settings.prefs.gitPath})</td></tr>
+            <tr><th>LFS</th><td>{GitDriver.lfsVersion() or _("(not available)")}</td></tr>
+            <tr><th>pygit2</th><td>{pygit2.__version__}</td></tr>
+            <tr><th>libgit2</th><td>{pygit2.LIBGIT2_VERSION} ({', '.join(getPygit2FeatureStrings())})</td></tr>
+            <tr><th>{QT_BINDING}</th><td>{QT_BINDING_VERSION}</td></tr>
+            <tr><th>Qt</th><td>{qVersion()}</td></tr>
+            <tr><th>mfusepy</th><td>{fuseInfo}</td></tr>
+            <tr><th>Pygments</th><td>{pygments.__version__}</td></tr>
+            <tr><th>Python</th><td>{'.'.join(str(i) for i in sys.version_info)}</td></tr>
+            </table>
         """))
 
         # ---------------------------------------------------------------------
@@ -123,10 +121,16 @@ class AboutDialog(QDialog):
         contributorCreditsPath = Path(QFile("assets:/contributors.txt").fileName())
         contributorCredits = contributorCreditsPath.read_text("utf-8")
         contributorCredits = contributorCredits.removeprefix("Iliyas Jorio\n")
-        contributorCredits = f"<blockquote style='white-space: pre'>{contributorCredits}</blockquote>"
+        contributorCredits = f"<center style='white-space: pre'>{contributorCredits}</center>"
 
-        translatorCreditsPath = Path(QFile("assets:lang/credits.html").fileName())
-        translatorCredits = translatorCreditsPath.read_text("utf-8")
+        translatorCreditsPath = Path(QFile("assets:lang/credits.json").fileName())
+        translatorCredits = json.loads(translatorCreditsPath.read_text("utf-8"))
+        translatorFilter = availableLocaleCodes()
+        translatorMarkup = "<center><table>" + "".join(
+            f"<tr><th>{localeCodeToLanguageName(lang)}:</th><td>{'<br>'.join(people)}</td></tr>\n"
+            for lang, people in translatorCredits.items()
+            if lang in translatorFilter
+        ) + "</table></center>"
 
         ackText = [
             _("Additional contributions by:") + contributorCredits,
@@ -134,12 +138,15 @@ class AboutDialog(QDialog):
             linkify(_("Translations welcome!"), TRANSLATE_URL)
             + " "
             + _("Brought to your native language by:")
-            + translatorCredits,
+            + translatorMarkup,
 
             _("Special thanks to Marc-Alexandre Espiaut for beta testing."),
         ]
 
-        self.ui.ackBlurb.setText(paragraphs(ackText))
+        ackMarkup = "<style>th { text-align: right; padding-right: 8px; color: gray; }</style>"
+        ackMarkup += paragraphs(*ackText)
+
+        self.ui.ackBlurb.setText(ackMarkup)
 
         # ---------------------------------------------------------------------
         # License page

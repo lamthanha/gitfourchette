@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# Copyright (C) 2025 Iliyas Jorio.
+# Copyright (C) 2026 Iliyas Jorio.
 # This file is part of GitFourchette, distributed under the GNU GPL v3.
 # For full terms, see the included LICENSE file.
 # -----------------------------------------------------------------------------
@@ -65,9 +65,8 @@ def excMessageBox(
 
         if showExcSummary:
             try:
-                from gitfourchette.trtables import TrTables
-                TrTables.init()
-                summary = f"{TrTables.exceptionName(exc)}: {exc}"
+                from gitfourchette import trtables
+                summary = f"{trtables.exceptionName(exc)}: {exc}"
             except:  # noqa: E722
                 summaryLines = traceback.format_exception_only(exc.__class__, exc)
                 summary = ''.join(summaryLines).strip()
@@ -97,10 +96,9 @@ def excMessageBox(
         # Keep user from triggering more exceptions by clicking on stuff in the background
         qmb.setWindowModality(Qt.WindowModality.ApplicationModal)
 
-        if isCritical:
-            if APP_DEBUG:
-                quitButton = qmb.addButton(QMessageBox.StandardButton.Reset)  # Reset button is leftmost in KDE
-                quitButton.setText(_("Quit application"))
+        if APP_DEBUG and isCritical:
+            quitButton = qmb.addButton(QMessageBox.StandardButton.Reset)  # Reset button is leftmost in KDE
+            quitButton.setText(_("Quit application"))
 
         dismissButton = qmb.addButton(QMessageBox.StandardButton.Ok)
         qmb.setDefaultButton(dismissButton)
@@ -122,9 +120,8 @@ def excMessageBox(
         sys.stderr.write("*********************************************\n")
         traceback.print_exception(excMessageBoxError)
 
-    if abortUnitTest:
-        if APP_TESTMODE:
-            raise exc
+    if APP_TESTMODE and abortUnitTest:
+        raise exc
 
 
 def _popExcMessageBoxQueue(result=QMessageBox.StandardButton.Ok):
@@ -166,7 +163,7 @@ def _showExcMessageBox(qmb):
 
 
 def asyncMessageBox(
-        parent: QWidget,
+        parent: QWidget | None,
         icon: MessageBoxIconName,
         title: str,
         text: str,
@@ -214,7 +211,6 @@ def asyncMessageBox(
 
     # macOS hacks to remove "modern" styling
     if MACOS:
-        qmb.setStyleSheet("QMessageBox QLabel { font-weight: normal; }")
         MakeNonNativeDialog(qmb)
 
     return qmb

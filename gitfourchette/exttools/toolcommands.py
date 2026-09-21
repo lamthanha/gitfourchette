@@ -80,8 +80,8 @@ class ToolCommands:
 
         # Remove single quotes added around our placeholders by shlex.join()
         # (e.g. '$L' --> $L, '--output=$M' --> $M)
-        newCommand = re.sub(r" '(\$[0-9A-Z]+)'", r" \1", newCommand, flags=re.I | re.A)
-        newCommand = re.sub(r" '(--?[a-z0-9\-_]+=\$[0-9A-Z]+)'", r" \1", newCommand, flags=re.I | re.A)
+        newCommand = re.sub(r" '(\$[0-9A-Z]+)'", r" \1", newCommand, flags=re.IGNORECASE)
+        newCommand = re.sub(r" '(--?[a-z0-9\-_]+=\$[0-9A-Z]+)'", r" \1", newCommand, flags=re.IGNORECASE)
 
         return newCommand
 
@@ -175,7 +175,7 @@ class ToolCommands:
     def filterQProcessEnvironment(cls, process: QProcess) -> dict[str, str]:
         processEnvironment = process.processEnvironment()
         env = {}
-        for key in processEnvironment.keys():
+        for key in processEnvironment.keys():  # noqa: SIM118
             value = processEnvironment.value(key)
             if value != INITIAL_ENVIRONMENT.get(key, None):
                 env[key] = value
@@ -279,7 +279,7 @@ class ToolCommands:
         return shutil.which(name, path=_whichPath)
 
     @classmethod
-    def makeTerminalScript(cls, workdir: str, command: str) -> str:
+    def makeTerminalScript(cls, workdir: str, commandTokens: list[str]) -> str:
         # While we could simply export the parameters as environment variables
         # then run termcmd.sh from the static assets, this approach fails if
         # the terminal is a Flatpak (custom env vars always seem to be erased).
@@ -302,7 +302,7 @@ class ToolCommands:
 
         script = textwrap.dedent(f"""\
             #!/usr/bin/env bash
-            _GF_COMMAND="{command}"
+            _GF_COMMAND={shlex.quote(shlex.join(commandTokens))}
             _GF_APPNAME={shlex.quote(qAppName())}
             _GF_YKEY={shlex.quote(yKey)}
             _GF_NKEY={shlex.quote(nKey)}

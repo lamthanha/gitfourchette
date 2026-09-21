@@ -16,12 +16,12 @@ def parseChangelog():
     versionLine = lines[bound1]
     notes = "\n".join(lines[bound1+1:bound2]).strip()
 
-    versionMatch = re.match(r"^## (\d(?:\.\d)+) \((20\d\d-\d\d-\d\d)\)", versionLine)
+    versionMatch = re.match(r"^## (\d+(?:\.\d+)+) \((20\d\d-\d\d-\d\d)\)", versionLine)
     version, versionDate = versionMatch.groups()
 
     # Make sure changelog date is close enough to now
     d1 = datetime.datetime.now(datetime.UTC)
-    d2 = datetime.datetime.strptime(versionDate, "%Y-%m-%d")
+    d2 = datetime.datetime.strptime(versionDate, "%Y-%m-%d").replace(tzinfo=datetime.UTC)
     d2 = d2.replace(tzinfo=datetime.UTC, hour=12)  # assume changelog time is UTC noon
     hourDiff = abs(d1 - d2).total_seconds() / 3600
     if hourDiff >= 24+12:

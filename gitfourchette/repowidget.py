@@ -6,8 +6,11 @@
 
 import logging
 import os
+import shlex
 from contextlib import suppress
+from typing import ClassVar
 
+from gitfourchette import trtables
 from gitfourchette import settings
 from gitfourchette import tasks
 from gitfourchette.diffarea import DiffArea
@@ -30,12 +33,14 @@ from gitfourchette.tasks import RepoTaskRunner, TaskEffects, TaskBook
 from gitfourchette.tasks.misctasks import VerifyGpgQueue
 from gitfourchette.tasks.nettasks import AutoFetchRemotes
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
 
 logger = logging.getLogger(__name__)
 
 
 class RepoWidget(QWidget):
+    sharedSplitterSizes: ClassVar[dict[str, list[int]]] = {}
+    "Shared reference among all RepoWidgets"
+
     nameChange = Signal()
     openRepo = Signal(str, NavLocator)
     openPrefs = Signal(str)
@@ -44,6 +49,7 @@ class RepoWidget(QWidget):
     requestAttention = Signal()
     becameVisible = Signal()
     mustReplaceWithStub = Signal(RepoStub)
+    aboutToDelete = Signal()
 
     busyMessage = Signal(str)
     statusMessage = Signal(str)
@@ -56,7 +62,6 @@ class RepoWidget(QWidget):
     navHistory: NavHistory
 
     splittersToSave: list[QSplitter]
-    sharedSplitterSizes: dict[str, list[int]]
     centralSplitSizesBackup: list[int]
 
     @property
@@ -76,7 +81,7 @@ class RepoWidget(QWidget):
         self.setObjectName(f"{type(self).__name__}({repoModel.shortName})")
 
         # The stylesheet must be refreshed so that subsequent tweakFont calls can take effect.
-        self.setStyleSheet("* {}")
+        reevaluateStyleSheet(self)
 
         # Use RepoTaskRunner to schedule git operations to run on a separate thread.
         self.taskRunner = taskRunner
@@ -101,7 +106,6 @@ class RepoWidget(QWidget):
         self.navLocator = NavLocator()
         self.navHistory = NavHistory()
 
-        self.sharedSplitterSizes = self.window().sharedSplitterSizes  # Shared reference in MainWindow
         self.centralSplitSizesBackup = []
 
         # ----------------------------------
@@ -361,10 +365,10 @@ class RepoWidget(QWidget):
             assert self.navLocator.isSimilarEnoughTo(locator), f"failed to jump to: {locator}"
 
     def navigateBack(self):
-        tasks.JumpBackOrForward.invoke(self, -1)
+        tasks.JumpBack.invoke(self)
 
     def navigateForward(self):
-        tasks.JumpBackOrForward.invoke(self, 1)
+        tasks.JumpForward.invoke(self)
 
     # -------------------------------------------------------------------------
 
@@ -393,6 +397,8 @@ class RepoWidget(QWidget):
 
         # Kill any ongoing task then block UI thread until the task dies cleanly
         self.taskRunner.prepareForDeletion()
+
+        self.aboutToDelete.emit()
 
         # Save sidebar collapse cache
         with NonCriticalOperation("Write repo prefs"):  # May raise OSError
@@ -525,7 +531,8 @@ class RepoWidget(QWidget):
                 question = _("Do you want to run this command in a terminal?")
             else:
                 question = _("Do you want to run {0} in a terminal?").format(hquo(stripAccelerators(command.userTitle)))
-            question += f"<p><tt>{escape(compiledCommand)}</tt></p>"
+            commandString = shlex.join(compiledCommand)
+            question += f"<p><tt>{escape(commandString)}</tt></p>"
             askConfirmation(self, title, question, callback=run)
         else:
             run()
@@ -616,7 +623,7 @@ class RepoWidget(QWidget):
         rstate = repo.state() if repo else RepositoryState.NONE
         from gitfourchette.tasks.rebasetasks import REBASE_STATES, rebaseProgress
 
-        bannerTitle = TrTables.enum(rstate) if rstate != RepositoryState.NONE else ""
+        bannerTitle = trtables.enum(rstate) if rstate != RepositoryState.NONE else ""
         bannerText = ""
         bannerHeeded = False
         bannerAction = ""
@@ -696,7 +703,7 @@ class RepoWidget(QWidget):
             bannerText = _(
                 "The repo is currently in state {state}, which {app} doesn’t support yet. "
                 "Use <code>git</code> on the command line to continue.",
-                app=qAppName(), state=bquo(TrTables.enum(rstate)))
+                app=qAppName(), state=bquo(trtables.enum(rstate)))
 
         with DisableWidgetUpdatesContext(self.sideSplitter):
             if bannerText or bannerTitle:
@@ -795,9 +802,6 @@ class RepoWidget(QWidget):
 
     def contextMenuItems(self):
         return self.contextMenuItemsByProxy(self, lambda: self)
-
-    def pathsMenuItems(self):
-        return self.pathsMenuItemsByProxy(self, lambda: self)
 
     @classmethod
     def contextMenuItemsByProxy(cls, invoker, proxy):

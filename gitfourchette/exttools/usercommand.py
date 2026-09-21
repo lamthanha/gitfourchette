@@ -9,13 +9,11 @@ from __future__ import annotations
 import dataclasses
 import enum
 import re
-import shlex
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from gitfourchette import pycompat  # noqa: F401 - StrEnum for Python 3.10
 from gitfourchette import settings
+from gitfourchette.appconsts import *
 from gitfourchette.localization import _, _p
 from gitfourchette.nav import NavContext
 from gitfourchette.porcelain import RefPrefix, split_remote_branch_shorthand
@@ -85,7 +83,7 @@ class UserCommand:
             return False
         return any(t in tokenSet for t in self.placeholderTokens)
 
-    def compile(self, context: RepoWidget) -> str:
+    def compile(self, context: RepoWidget) -> list[str]:
         tokens = ToolCommands.splitCommandTokens(self.command)
         placeholders = set(ToolCommands.findPlaceholderTokens(tokens))
 
@@ -108,8 +106,7 @@ class UserCommand:
             raise UserCommand.MultiTokenError(errors)
 
         tokens = ToolCommands.injectReplacements(tokens, replacements)
-        command = shlex.join(tokens)
-        return command
+        return tokens
 
     @classmethod
     def evalWorkdir(cls, context: RepoWidget):

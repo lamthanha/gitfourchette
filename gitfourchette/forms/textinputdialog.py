@@ -20,6 +20,7 @@ class TextInputDialog(QDialog):
             subtitle: str = "",
             multilineSubtitle: bool = False,
             hint: str = "",
+            selectableLabel: bool = True,
     ) -> None:
         super().__init__(parent)
 
@@ -38,6 +39,8 @@ class TextInputDialog(QDialog):
             promptLabel.setTextFormat(Qt.TextFormat.AutoText)
             promptLabel.setWordWrap(True)
             layout.addWidget(promptLabel, 0, 0)
+            if selectableLabel:
+                promptLabel.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         if hint:
             hintButton = QHintButton(self, hint)
@@ -46,6 +49,7 @@ class TextInputDialog(QDialog):
         layout.addWidget(self.lineEdit, 1, 0)
         layout.addWidget(self.buttonBox, 3, 0, 1, -1)
         # Leave row 2 free for setExtraWidget
+        layout.setRowStretch(1, 1)
         self.contentsLayout = layout
 
         convertToBrandedDialog(self, subtitleText=subtitle, multilineSubtitle=multilineSubtitle)

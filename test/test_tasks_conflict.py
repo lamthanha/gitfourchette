@@ -4,13 +4,12 @@
 # For full terms, see the included LICENSE file.
 # -----------------------------------------------------------------------------
 
-import pytest
-
+from gitfourchette.codeview.codewindow import CodeWindow
 from gitfourchette.gitdriver import GitConflictSides
 from gitfourchette.nav import NavLocator
+from gitfourchette.porcelain import *
 from . import reposcenario
 from .util import *
-from gitfourchette.porcelain import *
 
 
 @pytest.mark.parametrize("viaContextMenu", [False, True])
@@ -28,7 +27,7 @@ def testConflictDeletedByUs(tempDir, mainWindow, viaContextMenu):
     """
 
     wd = unpackRepo(tempDir)
-    runShellScript(scenario, directory=wd)
+    shell(scenario, directory=wd)
 
     rw = mainWindow.openRepo(wd)
 
@@ -50,8 +49,9 @@ def testConflictDeletedByUs(tempDir, mainWindow, viaContextMenu):
     if not viaContextMenu:
         rw.conflictView.ui.oursButton.click()
     else:
-        triggerContextMenuAction(rw.dirtyFiles.viewport(), "resolve by.+ours")
+        triggerContextMenuAction(rw.dirtyFiles.viewport(), "keep our")
 
+    acceptQMessageBox(rw, "keep our")
     assert not Path(wd, "a/a1.txt").exists()
 
     # -------------------------
@@ -67,8 +67,9 @@ def testConflictDeletedByUs(tempDir, mainWindow, viaContextMenu):
     if not viaContextMenu:
         rw.conflictView.ui.theirsButton.click()
     else:
-        triggerContextMenuAction(rw.dirtyFiles.viewport(), "resolve by.+theirs")
+        triggerContextMenuAction(rw.dirtyFiles.viewport(), "accept their")
 
+    acceptQMessageBox(rw, "accept their")
     assert not rw.repo.index.conflicts
     assert not rw.conflictView.isVisible()
     assert rw.repo.status() == {"a/a2.txt": FileStatus.INDEX_NEW}
@@ -92,7 +93,7 @@ def testConflictDeletedByThem(tempDir, mainWindow, viaContextMenu):
     """
 
     wd = unpackRepo(tempDir)
-    runShellScript(scenario, directory=wd)
+    shell(scenario, directory=wd)
 
     rw = mainWindow.openRepo(wd)
 
@@ -114,7 +115,8 @@ def testConflictDeletedByThem(tempDir, mainWindow, viaContextMenu):
     if not viaContextMenu:
         rw.conflictView.ui.oursButton.click()
     else:
-        triggerContextMenuAction(rw.dirtyFiles.viewport(), "resolve by.+ours")
+        triggerContextMenuAction(rw.dirtyFiles.viewport(), "keep our")
+    acceptQMessageBox(rw, "keep our")
 
     # -------------------------
     # Take their deletion of a2.txt
@@ -128,8 +130,9 @@ def testConflictDeletedByThem(tempDir, mainWindow, viaContextMenu):
     if not viaContextMenu:
         rw.conflictView.ui.theirsButton.click()
     else:
-        triggerContextMenuAction(rw.dirtyFiles.viewport(), "resolve by.+theirs")
+        triggerContextMenuAction(rw.dirtyFiles.viewport(), "accept their")
 
+    acceptQMessageBox(rw, "accept their")
     assert not rw.repo.index.conflicts
     assert not rw.conflictView.isVisible()
     assert rw.repo.status() == {"a/a2.txt": FileStatus.INDEX_DELETED}
@@ -154,7 +157,7 @@ def testConflictAddedByBothWithSymlinks(tempDir, mainWindow, keepOurs, viaContex
     """
 
     wd = unpackRepo(tempDir)
-    runShellScript(scenario, directory=wd)
+    shell(scenario, directory=wd)
 
     rw = mainWindow.openRepo(wd)
 
@@ -170,17 +173,17 @@ def testConflictAddedByBothWithSymlinks(tempDir, mainWindow, keepOurs, viaContex
     assert solveButton.isVisible()
 
     if viaContextMenu:
-        label = "resolve by.+" + ("ours" if keepOurs else "theirs")
-        triggerContextMenuAction(rw.dirtyFiles.viewport(), label)
+        triggerContextMenuAction(rw.dirtyFiles.viewport(), "keep our" if keepOurs else "accept their")
     else:
         solveButton.click()
+    acceptQMessageBox(rw, "keep our" if keepOurs else "accept their")
 
     assert symlinkPath.is_symlink()
     assert symlinkPath.resolve().samefile(Path(wd, "b" if keepOurs else "a"))
     assert rw.repo.index.conflicts is None
 
 
-@pytest.mark.parametrize("viaContextMenuLabel", ["", "resolve by.+ours", "resolve by.+theirs"])
+@pytest.mark.parametrize("viaContextMenuLabel", ["", "keep our", "accept their"])
 def testConflictDeletedByBothWithSymlinks(tempDir, mainWindow, viaContextMenuLabel):
     scenario = """
         mkdir -p xxx
@@ -203,7 +206,7 @@ def testConflictDeletedByBothWithSymlinks(tempDir, mainWindow, viaContextMenuLab
     """
 
     wd = unpackRepo(tempDir)
-    runShellScript(scenario, directory=wd)
+    shell(scenario, directory=wd)
 
     rw = mainWindow.openRepo(wd)
     rw.jump(NavLocator.inUnstaged("xxx/zzz"), check=True)
@@ -215,11 +218,13 @@ def testConflictDeletedByBothWithSymlinks(tempDir, mainWindow, viaContextMenuLab
 
     if not viaContextMenuLabel:
         solveButton.click()
+        acceptQMessageBox(rw, "keep our")
     else:
         # The context menu presents two options (accept theirs, keep ours)
         # because it doesn't have a special case for Deleted By Both.
         # Both options should yield the same outcome for Deleted By Both.
         triggerContextMenuAction(rw.dirtyFiles.viewport(), viaContextMenuLabel)
+        acceptQMessageBox(rw, viaContextMenuLabel)
 
     assert not Path(wd, "xxx/zzz").exists()
     assert "xxx/zzz" not in rw.repo.index.conflicts
@@ -237,7 +242,7 @@ def testConflictDoesntPreventManipulatingIndexOnOtherFile(tempDir, mainWindow):
     """
 
     wd = unpackRepo(tempDir)
-    runShellScript(scenario, directory=wd)
+    shell(scenario, directory=wd)
 
     rw = mainWindow.openRepo(wd)
     assert "a/a1.txt" in rw.repo.index.conflicts
@@ -267,7 +272,7 @@ def testShowConflictInBannerEvenIfNotViewingWorkdir(tempDir, mainWindow):
     rw.jump(NavLocator.inCommit(Oid(hex="49322bb17d3acc9146f98c97d078513228bbf3c0")))
 
     # Cause a conflict outside the app
-    runShellScript("git cherry-pick ce112d052 || true", directory=wd)
+    shell("git cherry-pick ce112d052 || true", directory=wd)
 
     rw.refreshRepo()
     assert rw.mergeBanner.isVisible()
@@ -318,9 +323,9 @@ def testMergeTool(tempDir, mainWindow):
     assert cv.ui.mergeButton.isVisible()
     cv.ui.mergeButton.click()
 
-    assert not cv.ui.mergeToolStatus.isVisible()
-    waitUntilTrue(cv.ui.mergeToolStatus.isVisible)
-    assert findTextInWidget(cv.ui.mergeToolStatus, r"didn.t complete")
+    assert not cv.ui.confirmMergeLabel.isVisible()
+    waitUntilTrue(cv.ui.confirmMergeLabel.isVisible)
+    assert findTextInWidget(cv.ui.confirmMergeLabel, r"file seems unchanged")
 
     scratchLines = readTextFile(scratchPath, unlink=True).strip().splitlines()
     assert "[MERGED]" in scratchLines[0]
@@ -421,8 +426,7 @@ def testFake3WayMerge(tempDir, mainWindow):
     GFApplication.applyPrefs(externalMerge=f'"{mergeToolPath}" "{scratchPath}" $M $L $R $B')
 
     wd = unpackRepo(tempDir, "testrepoformerging")
-    with RepoContext(wd) as repo:
-        repo.checkout_local_branch("i18n")
+    shell("git switch i18n", wd)
 
     rw = mainWindow.openRepo(wd)
     cv = rw.conflictView
@@ -510,13 +514,12 @@ def testDiscardMergeResolution(tempDir, mainWindow):
 
     wd = unpackRepo(tempDir, "testrepoformerging")
 
+    # Initiate merge of branch-conflicts into master
+    shell("git merge branch-conflicts || true", directory=wd)
+
     rw = mainWindow.openRepo(wd)
     cv = rw.conflictView
-    node = rw.sidebar.findNodeByRef("refs/heads/branch-conflicts")
 
-    # Initiate merge of branch-conflicts into master
-    triggerMenuAction(rw.sidebar.makeNodeMenu(node), "merge into.+master")
-    acceptQMessageBox(rw, "branch-conflicts.+into.+master.+may cause conflicts")
     assert ".gitignore" in rw.repo.index.conflicts
     assert cv.isVisible()
 
@@ -538,3 +541,110 @@ def testDiscardMergeResolution(tempDir, mainWindow):
     assert rw.navLocator.isSimilarEnoughTo(NavLocator.inUnstaged(".gitignore"))
     assert cv.ui.mergePage.isVisible()
     assert ".gitignore" in rw.repo.index.conflicts
+
+
+def testMergeToolDelayedWrite(tempDir, mainWindow):
+    detachTool = getTestDataPath("start-detach.py")
+    delayTool = getTestDataPath("delay-cmd.py")
+    mergeTool = getTestDataPath("merge-shim.py")
+    scratchPath = f"{tempDir.name}/external editor scratch file.txt"
+    command = f'"{detachTool}" "{delayTool}" --delay 2 "{mergeTool}" "{scratchPath}" $M $L $R $B'
+    GFApplication.applyPrefs(externalMerge=command)
+
+    wd = unpackRepo(tempDir, "testrepoformerging")
+
+    # Initiate merge of branch-conflicts into master
+    shell("git merge branch-conflicts || true", directory=wd)
+
+    rw = mainWindow.openRepo(wd)
+    cv = rw.conflictView
+
+    assert ".gitignore" in rw.repo.index.conflicts
+    assert cv.isVisible()
+    assert cv.ui.mergePage.isVisible()
+    assert findTextInWidget(cv.ui.mergeButton, "start-detach")
+    cv.ui.mergeButton.click()
+    waitUntilTrue(cv.ui.mergeCompletePage.isVisible)
+    assert findTextInWidget(cv.ui.confirmMergeLabel, "unchanged.+was the merge successful")
+
+    def refreshUntilMerged():
+        rw.refreshRepo()
+        return findTextInWidget(cv.ui.confirmMergeLabel, "it looks like you.ve finished")
+
+    waitUntilTrue(refreshUntilMerged, interval=500)
+
+    assert cv.ui.confirmMergeButton.isVisible()
+    cv.ui.confirmMergeButton.click()
+    assert not rw.repo.any_conflicts
+
+
+def testConflictSidePreview(tempDir, mainWindow):
+    wd = f"{tempDir.name}/myrepo"
+    Path(wd).mkdir()
+
+    # Create a conflict on file.c
+    # (It's a C file to exercise syntax highlighting in CodeWindow)
+    shell("""
+        git init -b master .
+        git commit --allow-empty -m 'root commit'
+        git switch -c they-modified
+
+        echo 'int hello = 1;' > file.c
+        git add file.c
+        git commit -m 'add file.c'
+        echo 'int hello = 2;' > file.c
+        git commit -am 'modify file.c'
+
+        git switch master
+        git cherry-pick they-modified || true
+    """, directory=wd)
+
+    rw = mainWindow.openRepo(wd)
+    assert "file.c" in rw.repo.index.conflicts
+
+    assert not CodeWindow._liveWindows
+
+    cv = rw.conflictView
+    assert not cv.ui.oursPreviewButton.isEnabled()
+    assert cv.ui.theirsPreviewButton.isEnabled()
+    cv.ui.theirsPreviewButton.click()
+
+    window = findWindow("their.+file.c", t=CodeWindow)
+    waitUntilTrue(lambda: QApplication.activeWindow() is window)
+    assert window.codeView.toPlainText().strip() == 'int hello = 2;'
+
+    # Ensure that clicking the button again re-raises the existing window.
+    # Bring mainWindow back to the foreground first.
+    mainWindow.activateWindow()
+    waitUntilTrue(lambda: QApplication.activeWindow() is mainWindow)
+    # Change window title to force findWindow to fail below
+    window.setWindowTitle("YOINK!")
+    # Click the button - no new window must be created
+    cv.ui.theirsPreviewButton.click()
+    with pytest.raises(KeyError):
+        findWindow("their.+file.c", t=CodeWindow)
+    # Clicking the button should have raised the existing window
+    waitUntilTrue(lambda: QApplication.activeWindow() is window)
+
+    # When the conflict vanishes, so should the window
+    assert findWindow("YOINK", t=CodeWindow)
+    cv.ui.theirsButton.click()
+    acceptQMessageBox(rw, "accept their")
+
+    with pytest.raises(KeyError):
+        findWindow("YOINK", t=CodeWindow)
+
+    waitUntilTrue(lambda: not CodeWindow._liveWindows)
+
+
+def testConflictSidesHasOursHasTheirs():
+    def get(sides):
+        return sides.hasOurs(), sides.hasTheirs()
+
+    assert get(GitConflictSides.BothDeleted) == (False, False)
+    assert get(GitConflictSides.AddedByUs) == (True, False)
+    assert get(GitConflictSides.DeletedByThem) == (True, False)
+    assert get(GitConflictSides.AddedByThem) == (False, True)
+    assert get(GitConflictSides.DeletedByUs) == (False, True)
+    assert get(GitConflictSides.BothAdded) == (True, True)
+    assert get(GitConflictSides.BothModified) == (True, True)

@@ -9,12 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from gitfourchette import trtables
+from gitfourchette.graph.graph import CommitTraits
 from gitfourchette.localization import *
 from gitfourchette.porcelain import *
 from gitfourchette.qt import *
 from gitfourchette.repomodel import UC_FAKEID, RepoModel, GpgStatus
 from gitfourchette.toolbox import *
-from gitfourchette.trtables import TrTables
 
 
 @dataclass
@@ -70,7 +71,7 @@ class CommitLogModel(QAbstractListModel):
         self.repoModel = repoModel
         self._authorColumnX = -1
         self._toolTipZones = {}
-        self.commitDiffAB = None
+        self.commitDiffAB: tuple[Oid, Oid] | None = None
 
         if repoModel.truncatedHistory:
             self._extraRow = SpecialRow.TruncatedHistory
@@ -104,7 +105,7 @@ class CommitLogModel(QAbstractListModel):
             n += 1
         return n
 
-    def data(self, index: QModelIndex, role: Qt.ItemDataRole = Qt.ItemDataRole.DisplayRole):
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
         row = index.row()
 
         if role == Qt.ItemDataRole.DisplayRole:
@@ -152,7 +153,10 @@ class CommitLogModel(QAbstractListModel):
             if commit is None or commit.id == UC_FAKEID:
                 return tip
 
-            x = self.parent().mapFromGlobal(QCursor.pos()).x()
+            parentWidget = self.parent()
+            assert isinstance(parentWidget, QWidget)
+            x = parentWidget.mapFromGlobal(QCursor.pos()).x()
+
             for zone in reversed(zones):
                 if not (zone.left <= x <= zone.right):
                     continue
@@ -181,20 +185,21 @@ class CommitLogModel(QAbstractListModel):
         elif role == CommitLogModel.Role.ToolTipZones:
             row = index.row()
 
-            # Bump row to end of keys
-            # (dicts keep key insertion order in Python 3.7+)
             self._toolTipZones.pop(row, None)
-            self._toolTipZones[row] = value
 
-            # Nuke old entries if the dict grew beyond the threshold
-            trimCacheDict(self._toolTipZones, CommitLogModel.ToolTipCacheSize)
+            if value:
+                # Bump row to end of keys (dicts keep key insertion order since Python 3.7)
+                self._toolTipZones[row] = value
+
+                # Nuke old entries if the dict grew beyond the threshold
+                trimCacheDict(self._toolTipZones, CommitLogModel.ToolTipCacheSize)
 
             return True
 
         return False
 
 
-def commitAuthorTooltip(commit: Commit, gpgStatus: GpgStatus, gpgKeyInfo: str) -> str:
+def commitAuthorTooltip(commit: CommitTraits, gpgStatus: GpgStatus, gpgKeyInfo: str) -> str:
     def formatTime(sig: Signature):
         return escape(signatureDateFormat(sig))
 
@@ -224,14 +229,14 @@ def commitAuthorTooltip(commit: Commit, gpgStatus: GpgStatus, gpgKeyInfo: str) -
     if gpgStatus == GpgStatus.Unsigned:
         pass
     elif gpgKeyInfo:
-        markup += f"<p>{gpgStatus.iconHtml()} {TrTables.enum(gpgStatus)}<br><small>{escape(gpgKeyInfo)}</small></p>"
+        markup += f"<p>{gpgStatus.iconHtml()} {trtables.enum(gpgStatus)}<br><small>{escape(gpgKeyInfo)}</small></p>"
     else:
-        markup += f"<p>{gpgStatus.iconHtml()} {TrTables.enum(gpgStatus)}</p>"
+        markup += f"<p>{gpgStatus.iconHtml()} {trtables.enum(gpgStatus)}</p>"
 
     return markup
 
 
-def commitMessageTooltip(commit: Commit) -> str:
+def commitMessageTooltip(commit: CommitTraits) -> str:
     message = commit.message.rstrip()
     maxLength = max(len(line) for line in message.splitlines())
     message = escape(message)

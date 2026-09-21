@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from typing import ClassVar, TYPE_CHECKING
+from typing import ClassVar
 
 from gitfourchette.gitdriver import GitDeltaSource
 from gitfourchette.porcelain import NULL_OID, Oid
@@ -188,8 +188,7 @@ class NavLocator:
 
     @staticmethod
     def inSpecial(special: SpecialRow) -> NavLocator:
-        intValue = special.value  # TODO: Just use 'str(special)' once we drop Python 3.10 compat
-        return NavLocator(context=NavContext.SPECIAL, path=str(intValue))
+        return NavLocator(context=NavContext.SPECIAL, path=str(special))
 
     def isSimilarEnoughTo(
             self,

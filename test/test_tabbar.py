@@ -130,7 +130,7 @@ def _setUpWorktrees(tempDir, *names, repoName="BeansApp") -> tuple[str, list[str
     parent = os.path.dirname(os.path.normpath(wd))
     paths = []
     for name in names:
-        runShellScript(f"git worktree add -b wt-{name.lower()} ../{name}", wd)
+        shell(f"git worktree add -b wt-{name.lower()} ../{name}", wd)
         paths.append(os.path.join(parent, name))
     return wd, paths
 
@@ -190,9 +190,9 @@ def testTabOverflowGhostHeaderOpensMainWorktree(tempDir, mainWindow):
 def testTabOverflowGhostHeaderDisabledForBareRepo(tempDir, mainWindow):
     wd = unpackRepo(tempDir, renameTo="BeansApp")
     parent = os.path.dirname(os.path.normpath(wd))
-    runShellScript("git clone --bare . ../Beans.git", wd)
+    shell("git clone --bare . ../Beans.git", wd)
     bare = os.path.join(parent, "Beans.git")
-    runShellScript("git worktree add -b wt-bare ../WtBare master", bare)
+    shell("git worktree add -b wt-bare ../WtBare master", bare)
     other = unpackRepo(tempDir, renameTo="TypingGame")
 
     mainWindow.openRepo(os.path.join(parent, "WtBare"))

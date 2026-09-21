@@ -6,16 +6,16 @@
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import filecmp
 import logging
-import os
 import shutil
+from typing import ClassVar
 
 from gitfourchette import settings
 from gitfourchette.gitdriver import GitConflict
 from gitfourchette.localization import *
-from gitfourchette.porcelain import Repo
 from gitfourchette.qt import *
 from gitfourchette.toolbox import *
 from gitfourchette.exttools.toolprocess import ToolProcess
@@ -28,24 +28,35 @@ class MergeDriver(QObject):
         Idle = 0
         Busy = 1
         Fail = 2
-        Ready = 3
+        Tentative = 3
+        Ready = 4
 
-    _ongoingMerges: list[MergeDriver] = []
-    _mergeCounter: int = 0
+    @dataclasses.dataclass
+    class MergeFiles:
+        ours: str
+        theirs: str
+        ancestor: str
+        scratch: str
+        target: str
+
+    _ongoingMerges: ClassVar[list[MergeDriver]] = []
+    _mergeCounter: ClassVar[int] = 0
 
     statusChange = Signal()
 
     conflict: GitConflict
+    paths: MergeFiles
     process: QProcess | None
     processName: str
     state: State
     debrief: str
 
-    def __init__(self, parent: QObject, repo: Repo, conflict: GitConflict):
+    def __init__(self, parent: QObject, conflict: GitConflict, paths: MergeFiles):
         super().__init__(parent)
 
         logger.info(f"Initialize MergeDriver: {conflict}")
         self.conflict = conflict
+        self.paths = paths
         self.process = None
         self.processName = "?"
         self.state = MergeDriver.State.Idle
@@ -54,42 +65,8 @@ class MergeDriver(QObject):
         assert conflict.ours, "MergeDriver requires an 'ours' side"
         assert conflict.theirs, "MergeDriver requires a 'theirs' side"
 
-        # Keep a reference to mergeDir so the temporary directory doesn't vanish
-        self.mergeDir = QTemporaryDir(os.path.join(qTempDir(), "merge"))
-        # self.mergeDir = tempfile.TemporaryDirectory(dir=qTempDir(), prefix="merge-", ignore_cleanup_errors=True)
-        # mergeDirPath = self.mergeDir.name
-        MergeDriver._mergeCounter += 1
-        mergeDirPath = self.mergeDir.path()
-
-        # Dump OURS and THEIRS blobs into the temporary directory
-        self.oursPath = conflict.ours.dump(repo, mergeDirPath, "[OURS]")
-        self.theirsPath = conflict.theirs.dump(repo, mergeDirPath, "[THEIRS]")
-
-        oursPath = conflict.ours.path
-        baseName = os.path.basename(oursPath)
-        self.targetPath = repo.in_workdir(oursPath)
-        self.relativeTargetPath = oursPath
-
-        if conflict.ancestor:
-            # Dump ANCESTOR blob into the temporary directory
-            self.ancestorPath = conflict.ancestor.dump(repo, mergeDirPath, "[ANCESTOR]")
-        else:
-            # There's no ancestor! Some merge tools can fake a 3-way merge without
-            # an ancestor (e.g. PyCharm), but others won't (e.g. VS Code).
-            # To make sure we get a 3-way merge, copy our current workdir file as
-            # the fake ANCESTOR file. It should contain chevron conflict markers
-            # (<<<<<<< >>>>>>>) which should trigger conflicts between OURS and
-            # THEIRS in the merge tool.
-            self.ancestorPath = os.path.join(mergeDirPath, f"[NO-ANCESTOR]{baseName}")
-            shutil.copyfile(self.targetPath, self.ancestorPath)
-
-        # Create scratch file (merge tool output).
-        # Some merge tools (such as VS Code) use the contents of this file
-        # as a starting point, so copy the workdir version for this purpose.
-        self.scratchPath = os.path.join(mergeDirPath, f"[MERGED]{baseName}")
-        shutil.copyfile(self.targetPath, self.scratchPath)
-
         # Keep track of this merge
+        MergeDriver._mergeCounter += 1
         MergeDriver._ongoingMerges.append(self)
         self.destroyed.connect(lambda: MergeDriver._forget(self))
 
@@ -99,11 +76,12 @@ class MergeDriver(QObject):
         self.deleteLater()
 
     def startProcess(self, reopenWorkInProgress=False):
+        paths = self.paths
         tokens = {
-            "$B": self.scratchPath if reopenWorkInProgress else self.ancestorPath,
-            "$L": self.oursPath,
-            "$R": self.theirsPath,
-            "$M": self.scratchPath
+            "$B": paths.scratch if reopenWorkInProgress else paths.ancestor,
+            "$L": paths.ours,
+            "$R": paths.theirs,
+            "$M": paths.scratch,
         }
         parentWidget = findParentWidget(self)
         self.process = ToolProcess.startProcess(parentWidget, ToolProcess.PrefKeyMergeTool, replacements=tokens, positional=[])
@@ -129,16 +107,14 @@ class MergeDriver(QObject):
         self.flush()
 
     def onMergeProcessFinished(self, exitCode: int, exitStatus: QProcess.ExitStatus):
-        if (exitCode != 0
-                or exitStatus == QProcess.ExitStatus.CrashExit
-                or filecmp.cmp(self.scratchPath, self.targetPath)):
+        if exitCode != 0 or exitStatus == QProcess.ExitStatus.CrashExit:
             informalPid = self.process.processId() if self.process else '???'
             logger.warning(f"Merge tool PID {informalPid} finished with code {exitCode}, {exitStatus}")
             self.state = MergeDriver.State.Fail
             self.debrief = _("{0} didn’t complete the merge.", tquo(self.processName))
             self.debrief += "\n" + _("Exit code: {0}.", exitCode)
         else:
-            self.state = MergeDriver.State.Ready
+            self.state = MergeDriver.State.Tentative
             self.debrief = ""
 
         self.flush()
@@ -149,8 +125,11 @@ class MergeDriver(QObject):
             self.process = None
         self.statusChange.emit()
 
+    def checkUnchanged(self):
+        return filecmp.cmp(self.paths.scratch, self.paths.target)
+
     def copyScratchToTarget(self):
-        shutil.copyfile(self.scratchPath, self.targetPath)
+        shutil.copyfile(self.paths.scratch, self.paths.target)
 
     @classmethod
     def findOngoingMerge(cls, conflict: GitConflict) -> MergeDriver | None:
