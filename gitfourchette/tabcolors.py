@@ -182,7 +182,7 @@ def makeTabColorMenus(
         workdir: str,
         repoPrefs,
         refresh: Callable[[], None],
-        openSettings: Callable[[], None],
+        openSettings: Callable[[], object],
 ) -> list[QMenu]:
     """
     Build the tab-color submenu(s) for a repo tab's context menu.

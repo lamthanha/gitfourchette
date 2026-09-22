@@ -20,6 +20,9 @@ from gitfourchette.qt import *
 from gitfourchette.repoprefs import RepoPrefs
 from gitfourchette.toolbox import *
 
+if TYPE_CHECKING:
+    from gitfourchette.worktrees import WorktreeInfo
+
 logger = logging.getLogger(__name__)
 
 UC_FAKEID = NULL_OID

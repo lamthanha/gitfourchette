@@ -43,7 +43,7 @@ def _widenPopupToFitContents(combo: QComboBox):
         view.setMinimumWidth(width)
         originalShowPopup()
 
-    combo.showPopup = showPopup
+    combo.showPopup = showPopup  # type: ignore[method-assign]
 
 
 class NewWorktreeDialog(QDialog):

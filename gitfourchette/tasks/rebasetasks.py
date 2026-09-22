@@ -340,9 +340,10 @@ def rebaseProgress(repo: Repo) -> tuple[int, int, str]:
             continue
 
         def read(name: str, base: Path = base) -> str:
-            with suppress(OSError):
+            try:
                 return (base / name).read_text("utf-8").strip()
-            return ""
+            except OSError:
+                return ""
 
         with suppress(ValueError):
             step = int(read(stepFile) or 0)
