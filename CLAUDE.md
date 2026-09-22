@@ -22,6 +22,7 @@ Roadmap: Phase 1 rebase foundation (DONE) → Phase 2 interactive rebase (DONE) 
 ## Testing
 
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest test -q -n auto` (full suite ~40-70s; must be 0 failed before committing).
+- `.venv/bin/ruff check .` and `.venv/bin/python -m mypy` must also pass before committing (CI's `ruff-mypy` job runs both; config in `pyproject.toml`). Upstream's `strict_optional = false` falsely flags `with suppress(E): return x` followed by a fallback `return` as unreachable; use `try`/`except` there. Annotation-only imports go under `if TYPE_CHECKING:`.
 - `.venv` uses `--system-site-packages` with Fedora's `python3-pyqt6` (system Qt → KDE/Breeze integration).
 - Test patterns: `test/test_tasks_rebase.py` (drive real context menus/dialogs, assert commit parentage and `repo.state()`); helpers in `test/util.py`, canned repos via `unpackRepo`, scenarios via `shell(script, wd)` (upstream renamed it from `runShellScript` in v1.11).
 - TDD is the norm: failing test first, then implementation.
